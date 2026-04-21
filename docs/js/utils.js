@@ -106,7 +106,7 @@ function compressImage(dataURI, maxWidth = 1200, quality = 0.7) {
   });
 }
 
-// Preprocess image for OCR: grayscale + contrast + binarize
+// Preprocess image for OCR: gentle grayscale + contrast enhancement
 function preprocessForOCR(dataURI) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -129,23 +129,19 @@ function preprocessForOCR(dataURI) {
       const imageData = ctx.getImageData(0, 0, w, h);
       const data = imageData.data;
 
-      // Convert to grayscale and increase contrast
+      // Gentle enhancement: grayscale + mild contrast boost
       for (let i = 0; i < data.length; i += 4) {
-        // Grayscale using luminance formula
+        // Grayscale
         let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        // Increase contrast: stretch the histogram
-        // Map 50-200 range to 0-255 for better text visibility
-        gray = ((gray - 50) / 150) * 255;
+        // Mild contrast boost: stretch from 40-220 → 0-255
+        gray = ((gray - 40) / 180) * 255;
         gray = Math.max(0, Math.min(255, gray));
-        // Binarize: text becomes black, background becomes white
-        // Use threshold of 140 (works well for most receipts/invoices)
-        gray = gray < 140 ? 0 : 255;
         data[i] = gray;
         data[i + 1] = gray;
         data[i + 2] = gray;
       }
       ctx.putImageData(imageData, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
     img.src = dataURI;
   });

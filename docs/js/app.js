@@ -230,14 +230,24 @@ async function renderTransactionAddPage(container, editId = null) {
         <button class="btn btn-primary btn-sm" id="save-btn">${isEdit ? '更新' : '保存'}</button>
       </div>
       <div class="form-page">
-        ${ocrResult && ocrResult.success ? `
-          <div class="ocr-status success">✓ 已识别到信息，请确认后保存
-            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
-          </div>
-        ` : ''}
-        ${ocrResult && !ocrResult.success ? `
-          <div class="ocr-status error">✗ 识别失败，请手动填写
-            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+        ${ocrResult ? `
+          <div style="margin-bottom:12px;">
+            ${ocrResult.success ? `
+              <div class="ocr-status success">✓ 已识别到信息，请对照原图确认后保存
+                <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+              </div>
+            ` : `
+              <div class="ocr-status error">✗ 识别不完整，请对照原图手动补齐
+                <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+              </div>
+            `}
+            ${receiptFiles.length > 0 ? `
+              <div style="margin-top:8px; text-align:center;">
+                <img src="${receiptFiles[0]}" style="max-width:100%; max-height:200px; border-radius:8px; border:1px solid var(--border);"
+                  onclick="viewImage(this.src)">
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:4px;">点击放大查看原图</div>
+              </div>
+            ` : ''}
           </div>
         ` : ''}
 
@@ -291,7 +301,8 @@ async function renderTransactionAddPage(container, editId = null) {
 
         ${receiptFiles.length === 0 ? `
           <div style="text-align:center; margin-top:8px;">
-            <button class="btn btn-outline" id="ocr-trigger-btn">📷 拍照识别</button>
+            <button class="btn btn-outline" id="ocr-trigger-btn">📷 拍照/选图识别</button>
+            <div style="font-size:11px; color:var(--text-secondary); margin-top:6px;">提示：从相册选择清晰照片识别更准确</div>
           </div>
         ` : ''}
       </div>
@@ -590,14 +601,24 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
         <button class="btn btn-primary btn-sm" id="save-inv-btn">${isEdit ? '更新' : '保存'}</button>
       </div>
       <div class="form-page">
-        ${ocrResult && ocrResult.success ? `
-          <div class="ocr-status success">✓ 已识别到信息，请确认后保存
-            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
-          </div>
-        ` : ''}
-        ${ocrResult && !ocrResult.success ? `
-          <div class="ocr-status error">✗ 识别失败，请手动填写
-            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+        ${ocrResult ? `
+          <div style="margin-bottom:12px;">
+            ${ocrResult.success ? `
+              <div class="ocr-status success">✓ 已识别到信息，请对照原图确认后保存
+                <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+              </div>
+            ` : `
+              <div class="ocr-status error">✗ 识别不完整，请对照原图手动补齐
+                <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+              </div>
+            `}
+            ${imageUri ? `
+              <div style="margin-top:8px; text-align:center;">
+                <img src="${imageUri}" style="max-width:100%; max-height:200px; border-radius:8px; border:1px solid var(--border);"
+                  onclick="viewImage(this.src)">
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:4px;">点击放大查看原图</div>
+              </div>
+            ` : ''}
           </div>
         ` : ''}
 
@@ -658,6 +679,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
         ${imageUri && !ocrResult && !isEdit ? `
           <div style="text-align:center; margin-top:8px;">
             <button class="btn btn-outline" id="inv-ocr-btn">🔍 识别发票内容</button>
+            <div style="font-size:11px; color:var(--text-secondary); margin-top:6px;">提示：从相册选择清晰照片识别更准确</div>
           </div>
         ` : ''}
       </div>
