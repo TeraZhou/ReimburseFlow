@@ -108,65 +108,82 @@ const OcrService = {
     return null;
   },
 
-  // Extract company title (buyer/purchaser)
+  // Extract company title (buyer/purchaser) - more flexible
   extractCompanyTitle(text) {
+    // Primary patterns: keyword then capture text until newline
     const patterns = [
-      /购买方[：:]*\s*名\s*称[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /购\s*买\s*方[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /买\s*方[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /抬头[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /购\s*方[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /购买方名称[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /名\s*称[：:]*\s*(.{2,30}?)[\n\r]/,
-      /公司[：:]*\s*(.{2,30}?)[\n\r\s]/,
+      /购\s*买\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /买\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /购\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /抬头\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /购\s*买\s*方\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /名\s*称\s*[：:]*\s*(.{2,40}?)[\n\r]/,
     ];
 
     for (const p of patterns) {
       const m = text.match(p);
       if (m) {
         let name = m[1].trim();
-        // Clean up common OCR artifacts
-        name = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9（）()有限公司]/g, '').trim();
+        // Clean up OCR artifacts but keep Chinese, English, numbers, common punctuation
+        name = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9（）()\s有限责公集团科技发展实业控股股份]/g, '').trim();
         if (name.length >= 2) return name;
       }
     }
 
-    // Fallback: look for company-like names ending with 公司/有限公司
-    const companyMatch = text.match(/([\u4e00-\u9fa5]{2,20}(?:有限)?公司)/);
-    if (companyMatch) return companyMatch[1];
+    // Fallback 1: find company names ending with 公司/有限公司/有限责任公司
+    const companyPatterns = [
+      /([\u4e00-\u9fa5]{2,15}(?:有限责任|有限)?公司)/,
+      /([\u4e00-\u9fa5]{2,10}(?:集团|集团有限)?公司)/,
+    ];
+    for (const p of companyPatterns) {
+      const matches = [...text.matchAll(p)];
+      if (matches.length > 0) {
+        // Return first match (buyer company is usually mentioned first)
+        return matches[0][1];
+      }
+    }
 
     return null;
   },
 
-  // Extract invoice number
+  // Extract invoice number - more flexible matching
   extractInvoiceNumber(text) {
+    // Primary patterns: keyword + number (allow spaces in keyword)
     const patterns = [
-      /发票号码[：:]*\s*(\d{8,20})/,
-      /No[.：:]*\s*(\d{8,20})/i,
-      /号码[：:]*\s*(\d{8,20})/,
-      /编号[：:]*\s*(\d{8,20})/,
+      /发\s*票\s*号\s*码\s*[：:]*\s*[￥¥]?\s*[（(]?\s*(\d{8,20})/,
+      /发\s*票\s*号\s*[：:]*\s*[￥¥]?\s*[（(]?\s*(\d{8,20})/,
+      /号\s*码\s*[：:]*\s*(\d{8,20})/,
+      /编\s*号\s*[：:]*\s*(\d{8,20})/,
+      /No\s*[.：:]*\s*(\d{8,20})/i,
+      /Invoice\s*No\s*[.：:]*\s*(\d{8,20})/i,
     ];
     for (const p of patterns) {
       const m = text.match(p);
       if (m) return m[1];
     }
+
+    // Fallback: find the longest digit sequence (8+ digits) - likely the invoice number
+    const digitMatches = text.match(/\d{8,20}/g);
+    if (digitMatches && digitMatches.length > 0) {
+      return digitMatches.reduce((a, b) => a.length >= b.length ? a : b);
+    }
+
     return null;
   },
 
-  // Extract seller name
+  // Extract seller name - more flexible
   extractSellerName(text) {
     const patterns = [
-      /销售方[：:]*\s*名\s*称[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /销\s*售\s*方[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /卖\s*方[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /收款单位[：:]*\s*(.{2,30}?)[\n\r\s]/,
-      /销售方名称[：:]*\s*(.{2,30}?)[\n\r]/,
+      /销\s*售\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /卖\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /收款单位\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      /销\s*售\s*方\s*[：:]*\s*(.{2,40}?)[\n\r]/,
     ];
     for (const p of patterns) {
       const m = text.match(p);
       if (m) {
         let name = m[1].trim();
-        name = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9（）()有限公司]/g, '').trim();
+        name = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9（）()\s有限责公集团科技发展实业控股股份]/g, '').trim();
         if (name.length >= 2) return name;
       }
     }
@@ -196,13 +213,16 @@ const OcrService = {
     return categories.find(c => c.name === '其他') || categories[0];
   },
 
-  // Process image using Tesseract.js
+  // Process image using Tesseract.js with preprocessing
   async recognizeText(imageDataURI) {
     try {
+      // Preprocess image for better OCR accuracy
+      const processed = await preprocessForOCR(imageDataURI);
+
       if (typeof Tesseract === 'undefined') {
         await this.loadTesseract();
       }
-      const result = await Tesseract.recognize(imageDataURI, 'chi_sim+eng', {
+      const result = await Tesseract.recognize(processed, 'chi_sim+eng', {
         logger: () => {}
       });
       return result.data.text;

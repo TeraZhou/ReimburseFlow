@@ -106,6 +106,51 @@ function compressImage(dataURI, maxWidth = 1200, quality = 0.7) {
   });
 }
 
+// Preprocess image for OCR: grayscale + contrast + binarize
+function preprocessForOCR(dataURI) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      // Limit to 2000px for OCR processing
+      const maxDim = 2000;
+      if (w > maxDim || h > maxDim) {
+        const scale = maxDim / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+
+      // Get pixel data
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const data = imageData.data;
+
+      // Convert to grayscale and increase contrast
+      for (let i = 0; i < data.length; i += 4) {
+        // Grayscale using luminance formula
+        let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        // Increase contrast: stretch the histogram
+        // Map 50-200 range to 0-255 for better text visibility
+        gray = ((gray - 50) / 150) * 255;
+        gray = Math.max(0, Math.min(255, gray));
+        // Binarize: text becomes black, background becomes white
+        // Use threshold of 140 (works well for most receipts/invoices)
+        gray = gray < 140 ? 0 : 255;
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.src = dataURI;
+  });
+}
+
 // Toast notification
 function showToast(message, duration = 2000) {
   const existing = document.querySelector('.toast');

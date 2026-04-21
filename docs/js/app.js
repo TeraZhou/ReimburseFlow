@@ -1,5 +1,6 @@
 // ===== App Entry & Router =====
 let currentPage = null;
+let autoOpenCamera = false; // Global flag for camera shortcut
 
 async function init() {
   await openDB();
@@ -96,7 +97,7 @@ async function renderHomePage(container) {
         <button class="quick-action-btn" onclick="location.hash='#/transactions/add'">
           <span class="icon">✏️</span>手动记账
         </button>
-        <button class="quick-action-btn" onclick="location.hash='#/transactions/add?ocr=1'">
+        <button class="quick-action-btn" id="photo-shortcut-btn">
           <span class="icon">📷</span>拍照记账
         </button>
         <button class="quick-action-btn" onclick="location.hash='#/invoices/add'">
@@ -133,14 +134,11 @@ async function renderHomePage(container) {
     showToast('导出成功');
   });
 
-  // Handle OCR shortcut
-  if (location.hash.includes('ocr=1')) {
+  // Photo shortcut - set flag then navigate once
+  document.getElementById('photo-shortcut-btn').addEventListener('click', () => {
+    autoOpenCamera = true;
     location.hash = '#/transactions/add';
-    setTimeout(() => {
-      const ocrBtn = document.getElementById('ocr-trigger-btn');
-      if (ocrBtn) ocrBtn.click();
-    }, 300);
-  }
+  });
 }
 
 // ===== TRANSACTION LIST PAGE =====
@@ -233,10 +231,14 @@ async function renderTransactionAddPage(container, editId = null) {
       </div>
       <div class="form-page">
         ${ocrResult && ocrResult.success ? `
-          <div class="ocr-status success">✓ 已识别到信息，请确认后保存</div>
+          <div class="ocr-status success">✓ 已识别到信息，请确认后保存
+            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+          </div>
         ` : ''}
         ${ocrResult && !ocrResult.success ? `
-          <div class="ocr-status error">✗ 识别失败，请手动填写</div>
+          <div class="ocr-status error">✗ 识别失败，请手动填写
+            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+          </div>
         ` : ''}
 
         <div class="form-group">
@@ -407,9 +409,26 @@ async function renderTransactionAddPage(container, editId = null) {
         input.click();
       });
     }
+
+    // View OCR raw text
+    const viewOcrLink = document.getElementById('view-ocr-text');
+    if (viewOcrLink && ocrResult && ocrResult.text) {
+      viewOcrLink.addEventListener('click', () => {
+        alert('OCR 识别原文:\n\n' + ocrResult.text);
+      });
+    }
   }
 
   render();
+
+  // Auto-open camera if coming from photo shortcut
+  if (autoOpenCamera) {
+    autoOpenCamera = false;
+    setTimeout(() => {
+      const ocrBtn = document.getElementById('ocr-trigger-btn');
+      if (ocrBtn) ocrBtn.click();
+    }, 300);
+  }
 }
 
 // ===== TRANSACTION DETAIL PAGE =====
@@ -572,10 +591,14 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
       </div>
       <div class="form-page">
         ${ocrResult && ocrResult.success ? `
-          <div class="ocr-status success">✓ 已识别到信息，请确认后保存</div>
+          <div class="ocr-status success">✓ 已识别到信息，请确认后保存
+            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+          </div>
         ` : ''}
         ${ocrResult && !ocrResult.success ? `
-          <div class="ocr-status error">✗ 识别失败，请手动填写</div>
+          <div class="ocr-status error">✗ 识别失败，请手动填写
+            <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
+          </div>
         ` : ''}
 
         <div class="form-group">
@@ -718,6 +741,14 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
     if (invOcrBtn) {
       invOcrBtn.addEventListener('click', async () => {
         await runOcr();
+      });
+    }
+
+    // View OCR raw text
+    const viewOcrLink = document.getElementById('view-ocr-text');
+    if (viewOcrLink && ocrResult && ocrResult.text) {
+      viewOcrLink.addEventListener('click', () => {
+        alert('OCR 识别原文:\n\n' + ocrResult.text);
       });
     }
   }
