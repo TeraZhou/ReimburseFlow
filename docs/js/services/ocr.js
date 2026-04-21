@@ -66,8 +66,8 @@ const OcrService = {
   extractDate(text) {
     // Priority 1: Standard formats with separators or Chinese chars
     const patterns = [
-      // 2026年04月15日
-      /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+      // 2026年04月15日 (日 may be OCR'd as 晶 or other similar chars, so make it optional)
+      /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})/,
       // 2026-04-15 or 2026/04/15
       /(\d{4})[-/](\d{1,2})[-/](\d{1,2})/,
       // 26-04-15 or 26/04/15
