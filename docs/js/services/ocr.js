@@ -129,14 +129,15 @@ const OcrService = {
 
   // Extract company title (buyer/purchaser) - more flexible
   extractCompanyTitle(text) {
-    // Primary patterns: keyword then capture text until newline
+    // Boundary: stop at newline, ＃, #, |, or second "名称"
+    const boundary = '[\\n\\r＃#|]';
     const patterns = [
-      /购\s*买\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /买\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /购\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /抬头\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /购\s*买\s*方\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /名\s*称\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      new RegExp(`购\\s*买\\s*方\\s*(?:名\\s*称)?\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`买\\s*方\\s*(?:名\\s*称)?\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`购\\s*方\\s*(?:名\\s*称)?\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`抬头\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`购\\s*买\\s*方\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`名\\s*称\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
     ];
 
     for (const p of patterns) {
@@ -192,11 +193,14 @@ const OcrService = {
 
   // Extract seller name - more flexible
   extractSellerName(text) {
+    const boundary = '[\\n\\r＃#|]';
     const patterns = [
-      /销\s*售\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /卖\s*方\s*(?:名\s*称)?\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /收款单位\s*[：:]*\s*(.{2,40}?)[\n\r]/,
-      /销\s*售\s*方\s*[：:]*\s*(.{2,40}?)[\n\r]/,
+      new RegExp(`销\\s*售\\s*方\\s*(?:名\\s*称)?\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`卖\\s*方\\s*(?:名\\s*称)?\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`收款单位\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      new RegExp(`销\\s*售\\s*方\\s*[：:]*\\s*(.{2,40}?)${boundary}`),
+      // Fallback: second "名称" after ＃ is usually the seller
+      /＃\s*名\s*称\s*[：:]*\s*(.{2,40}?)[\n\r＃#|]/,
     ];
     for (const p of patterns) {
       const m = text.match(p);
@@ -205,6 +209,12 @@ const OcrService = {
         name = name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9（）()\s有限责公集团科技发展实业控股股份]/g, '').trim();
         if (name.length >= 2) return name;
       }
+    }
+    // Fallback: second company name in text
+    const companyPattern = /[\u4e00-\u9fa5]{2,15}(?:有限责任|有限)?公司/g;
+    const matches = [...text.matchAll(companyPattern)];
+    if (matches.length >= 2) {
+      return matches[1][0];
     }
     return null;
   },
