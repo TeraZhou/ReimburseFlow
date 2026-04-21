@@ -1,0 +1,30 @@
+<canvas id="c" width="512" height="512"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+// Background
+ctx.fillStyle = '#1A73E8';
+ctx.fillRect(0, 0, 512, 512);
+// Rounded rect clip
+// Circle
+ctx.fillStyle = '#FFFFFF';
+ctx.beginPath();
+ctx.arc(256, 220, 100, 0, Math.PI * 2);
+ctx.fill();
+// Receipt body
+ctx.fillStyle = '#FFFFFF';
+ctx.beginPath();
+ctx.roundRect(156, 260, 200, 180, 12);
+ctx.fill();
+// Lines on receipt
+ctx.fillStyle = '#DADCE0';
+for (let i = 0; i < 4; i++) {
+  ctx.fillRect(186, 290 + i * 36, 140, 12);
+}
+// ¥ symbol
+ctx.fillStyle = '#1A73E8';
+ctx.font = 'bold 80px sans-serif';
+ctx.textAlign = 'center';
+ctx.fillText('¥', 256, 250);
+</script>
+<p>Right-click the canvas to save as icon-512.png, then resize to 192 for icon-192.png</p>
