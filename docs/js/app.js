@@ -219,14 +219,12 @@ async function renderTransactionAddPage(container, editId = null) {
   let ocrResult = null;
   let receiptFiles = transaction ? (transaction.receipt_uris || []) : [];
 
-  // Check if OCR mode
-  const isOcrMode = !isEdit;
-
   function render() {
     const defaultDate = transaction ? DateUtil.format(transaction.transaction_date) : DateUtil.format(Date.now());
     const defaultAmount = transaction ? transaction.amount : '';
     const defaultDesc = transaction ? (transaction.description || '') : '';
     const defaultCatId = transaction ? transaction.category_id : (categories[0] ? categories[0].id : '');
+    const defaultCompany = transaction ? (transaction.company_title || '') : '';
 
     container.innerHTML = `
       <div class="page-header">
@@ -250,6 +248,12 @@ async function renderTransactionAddPage(container, editId = null) {
         <div class="form-group">
           <label>日期</label>
           <input type="date" id="tx-date" value="${ocrResult && ocrResult.date ? DateUtil.format(ocrResult.date) : defaultDate}">
+        </div>
+
+        <div class="form-group">
+          <label>公司抬头</label>
+          <input type="text" id="tx-company" placeholder="购买方名称（选填）"
+            value="${ocrResult && ocrResult.company_title ? ocrResult.company_title : defaultCompany}">
         </div>
 
         <div class="form-group">
@@ -283,7 +287,7 @@ async function renderTransactionAddPage(container, editId = null) {
           <input type="file" id="receipt-input" accept="image/*" style="display:none">
         </div>
 
-        ${isOcrMode && receiptFiles.length === 0 ? `
+        ${receiptFiles.length === 0 ? `
           <div style="text-align:center; margin-top:8px;">
             <button class="btn btn-outline" id="ocr-trigger-btn">📷 拍照识别</button>
           </div>
@@ -297,6 +301,7 @@ async function renderTransactionAddPage(container, editId = null) {
       const dateStr = document.getElementById('tx-date').value;
       const catId = parseInt(document.getElementById('tx-category').value);
       const desc = document.getElementById('tx-desc').value.trim();
+      const companyTitle = document.getElementById('tx-company').value.trim();
 
       if (amount <= 0) {
         showToast('请输入金额');
@@ -318,6 +323,7 @@ async function renderTransactionAddPage(container, editId = null) {
         category_id: catId,
         transaction_date: dateTimestamp,
         description: desc,
+        company_title: companyTitle,
         receipt_uris: receiptFiles,
         is_from_ocr: ocrResult && ocrResult.success ? 1 : 0,
       };
@@ -334,7 +340,7 @@ async function renderTransactionAddPage(container, editId = null) {
       location.hash = '#/transactions';
     });
 
-    // Receipt file input
+    // Receipt file input (uses hidden input, cancel = returns to form normally)
     const receiptInput = document.getElementById('receipt-input');
     const addBtn = document.getElementById('add-receipt-btn');
     if (addBtn) {
@@ -361,18 +367,17 @@ async function renderTransactionAddPage(container, editId = null) {
       });
     });
 
-    // OCR trigger button
+    // OCR trigger button - creates a file input that returns to form on cancel
     const ocrBtn = document.getElementById('ocr-trigger-btn');
     if (ocrBtn) {
-      ocrBtn.addEventListener('click', async () => {
-        // Create file input for camera
+      ocrBtn.addEventListener('click', () => {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
         input.capture = 'environment';
-        input.onchange = async (e) => {
+        input.addEventListener('change', async (e) => {
           const file = e.target.files[0];
-          if (!file) return;
+          if (!file) return; // User cancelled - stays on form, no navigation
           const dataURI = await fileToDataURI(file);
           const compressed = await compressImage(dataURI);
           receiptFiles = [compressed];
@@ -381,7 +386,7 @@ async function renderTransactionAddPage(container, editId = null) {
           ocrResult = null;
           render();
 
-          // Add a temporary loading indicator
+          // Add loading indicator
           const pageContent = container.querySelector('.form-page');
           if (pageContent) {
             const loadingDiv = document.createElement('div');
@@ -396,7 +401,11 @@ async function renderTransactionAddPage(container, editId = null) {
             ocrResult = { success: false };
           }
           render();
-        };
+        });
+        // Also handle cancel event for mobile browsers
+        input.addEventListener('cancel', () => {
+          // User cancelled camera - do nothing, stay on form
+        });
         input.click();
       });
     }
@@ -434,6 +443,12 @@ async function renderTransactionDetailPage(container, id) {
         <span class="detail-label">日期</span>
         <span class="detail-value">${DateUtil.format(transaction.transaction_date)}</span>
       </div>
+      ${transaction.company_title ? `
+        <div class="detail-row">
+          <span class="detail-label">公司抬头</span>
+          <span class="detail-value">${transaction.company_title}</span>
+        </div>
+      ` : ''}
       <div class="detail-row">
         <span class="detail-label">录入方式</span>
         <span class="detail-value">${transaction.is_from_ocr ? 'OCR识别' : '手动录入'}</span>
@@ -542,6 +557,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
   let invoice = editId ? await InvoiceService.getById(editId) : null;
   const isEdit = !!invoice;
   let imageUri = invoice ? invoice.image_uri : null;
+  let ocrResult = null;
 
   function render() {
     const defaultDate = invoice ? DateUtil.format(invoice.invoice_date) : DateUtil.format(Date.now());
@@ -557,29 +573,41 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
         <button class="btn btn-primary btn-sm" id="save-inv-btn">${isEdit ? '更新' : '保存'}</button>
       </div>
       <div class="form-page">
+        ${ocrResult && ocrResult.success ? `
+          <div class="ocr-status success">✓ 已识别到信息，请确认后保存</div>
+        ` : ''}
+        ${ocrResult && !ocrResult.success ? `
+          <div class="ocr-status error">✗ 识别失败，请手动填写</div>
+        ` : ''}
+
         <div class="form-group">
           <label>金额</label>
-          <input type="number" id="inv-amount" class="amount-input" placeholder="0.00" step="0.01" value="${defaultAmount}">
+          <input type="number" id="inv-amount" class="amount-input" placeholder="0.00" step="0.01"
+            value="${ocrResult && ocrResult.amount != null ? ocrResult.amount : defaultAmount}">
         </div>
 
         <div class="form-group">
           <label>日期</label>
-          <input type="date" id="inv-date" value="${defaultDate}">
+          <input type="date" id="inv-date"
+            value="${ocrResult && ocrResult.date ? DateUtil.format(ocrResult.date) : defaultDate}">
         </div>
 
         <div class="form-group">
           <label>公司抬头</label>
-          <input type="text" id="inv-company" placeholder="购买方名称" value="${defaultCompany}">
+          <input type="text" id="inv-company" placeholder="购买方名称"
+            value="${ocrResult && ocrResult.company_title ? ocrResult.company_title : defaultCompany}">
         </div>
 
         <div class="form-group">
           <label>发票号码</label>
-          <input type="text" id="inv-number" placeholder="选填，用于查重" value="${defaultNumber}">
+          <input type="text" id="inv-number" placeholder="选填，用于查重"
+            value="${ocrResult && ocrResult.invoice_number ? ocrResult.invoice_number : defaultNumber}">
         </div>
 
         <div class="form-group">
           <label>销售方名称</label>
-          <input type="text" id="inv-seller" placeholder="选填" value="${defaultSeller}">
+          <input type="text" id="inv-seller" placeholder="选填"
+            value="${ocrResult && ocrResult.seller_name ? ocrResult.seller_name : defaultSeller}">
         </div>
 
         <div class="form-group">
@@ -605,6 +633,12 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
           </div>
           <input type="file" id="inv-file-input" accept="image/*" style="display:none">
         </div>
+
+        ${imageUri && !ocrResult && !isEdit ? `
+          <div style="text-align:center; margin-top:8px;">
+            <button class="btn btn-outline" id="inv-ocr-btn">🔍 识别发票内容</button>
+          </div>
+        ` : ''}
       </div>
     `;
 
@@ -649,7 +683,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
       location.hash = '#/invoices';
     });
 
-    // Image upload
+    // Image upload with OCR
     const fileInput = document.getElementById('inv-file-input');
     const addImgBtn = document.getElementById('add-inv-img');
     if (addImgBtn) {
@@ -661,10 +695,13 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
     if (fileInput) {
       fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file) return; // User cancelled - stays on form
         const dataURI = await fileToDataURI(file);
         imageUri = await compressImage(dataURI);
+
+        // Auto-trigger OCR after taking photo
         render();
+        await runOcr();
       });
     }
 
@@ -674,9 +711,42 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         imageUri = null;
+        ocrResult = null;
         render();
       });
     }
+
+    // Manual OCR trigger button
+    const invOcrBtn = document.getElementById('inv-ocr-btn');
+    if (invOcrBtn) {
+      invOcrBtn.addEventListener('click', async () => {
+        await runOcr();
+      });
+    }
+  }
+
+  async function runOcr() {
+    if (!imageUri) return;
+    const categories = await CategoryService.getAll();
+
+    ocrResult = null;
+    render();
+
+    // Add loading indicator
+    const pageContent = container.querySelector('.form-page');
+    if (pageContent) {
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'ocr-status loading';
+      loadingDiv.textContent = '⏳ 正在识别发票内容...';
+      pageContent.insertBefore(loadingDiv, pageContent.firstChild);
+    }
+
+    try {
+      ocrResult = await OcrService.processImage(imageUri, categories);
+    } catch (err) {
+      ocrResult = { success: false };
+    }
+    render();
   }
 
   render();
