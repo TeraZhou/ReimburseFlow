@@ -98,7 +98,7 @@ async function renderHomePage(container) {
           <span class="icon">✏️</span>手动记账
         </button>
         <button class="quick-action-btn" id="photo-shortcut-btn">
-          <span class="icon">📷</span>拍照记账
+          <span class="icon">📷</span>拍照/选图记账
         </button>
         <button class="quick-action-btn" onclick="location.hash='#/invoices/add'">
           <span class="icon">🧾</span>上传发票

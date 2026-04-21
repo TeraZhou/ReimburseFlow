@@ -64,6 +64,7 @@ const OcrService = {
 
   // Extract date from OCR text - support more formats
   extractDate(text) {
+    // Priority 1: Standard formats with separators or Chinese chars
     const patterns = [
       // 2026年04月15日
       /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
@@ -71,8 +72,6 @@ const OcrService = {
       /(\d{4})[-/](\d{1,2})[-/](\d{1,2})/,
       // 26-04-15 or 26/04/15
       /(\d{2})[-/](\d{1,2})[-/](\d{1,2})/,
-      // 20260415
-      /(\d{4})(\d{2})(\d{2})/,
     ];
 
     for (const p of patterns) {
@@ -88,7 +87,27 @@ const OcrService = {
       }
     }
 
-    // Try to find date near keywords
+    // Priority 2: 8 consecutive digits YYYYMMDD (OCR often merges "2025年02月18日" into "20250218" or "202545020181")
+    const dateNums = [...text.matchAll(/\d{8,10}/g)];
+    for (const m of dateNums) {
+      const s = m[0];
+      // Try different split points for YYYY-MM-DD
+      for (let yLen = 4; yLen <= 4; yLen++) {
+        for (let mLen = 1; mLen <= 2; mLen++) {
+          const dStart = yLen + mLen;
+          const dLen = s.length - dStart;
+          if (dLen < 1 || dLen > 2) continue;
+          const year = parseInt(s.substring(0, yLen));
+          const month = parseInt(s.substring(yLen, yLen + mLen));
+          const day = parseInt(s.substring(dStart));
+          if (year >= 2020 && year <= 2030 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return new Date(year, month - 1, day).getTime();
+          }
+        }
+      }
+    }
+
+    // Priority 3: Date near keywords
     const dateKeywordPatterns = [
       /(?:开票日期|日期|时间|Date)[：:]*\s*(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})/i,
     ];
