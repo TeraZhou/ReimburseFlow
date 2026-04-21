@@ -367,17 +367,16 @@ async function renderTransactionAddPage(container, editId = null) {
       });
     });
 
-    // OCR trigger button - creates a file input that returns to form on cancel
+    // OCR trigger button - NO capture attribute, uses system picker
     const ocrBtn = document.getElementById('ocr-trigger-btn');
     if (ocrBtn) {
       ocrBtn.addEventListener('click', () => {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
-        input.capture = 'environment';
         input.addEventListener('change', async (e) => {
           const file = e.target.files[0];
-          if (!file) return; // User cancelled - stays on form, no navigation
+          if (!file) return; // User cancelled - stays on form
           const dataURI = await fileToDataURI(file);
           const compressed = await compressImage(dataURI);
           receiptFiles = [compressed];
@@ -402,9 +401,8 @@ async function renderTransactionAddPage(container, editId = null) {
           }
           render();
         });
-        // Also handle cancel event for mobile browsers
         input.addEventListener('cancel', () => {
-          // User cancelled camera - do nothing, stay on form
+          // User cancelled - do nothing, stay on form
         });
         input.click();
       });
@@ -688,7 +686,6 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
     const addImgBtn = document.getElementById('add-inv-img');
     if (addImgBtn) {
       addImgBtn.addEventListener('click', () => {
-        fileInput.setAttribute('capture', 'environment');
         fileInput.click();
       });
     }

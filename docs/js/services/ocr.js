@@ -2,41 +2,54 @@
 const OcrService = {
   // Extract amount from OCR text - prioritize total/合计 over other numbers
   extractAmount(text) {
-    // Priority 1: Keywords that clearly indicate the total amount
-    const totalPatterns = [
-      /合计[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
-      /总计[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
-      /总\s*额[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
-      /应\s*收[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
-      /应\s*付[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
-      /Amount[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/i,
-      /Total[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/i,
-      /价税合计[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
-    ];
+    // Priority 1: 价税合计 (total with tax) - MUST be highest priority
+    const priceTaxTotal = text.match(/价\s*税\s*合\s*计[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*[（(]?\s*(\d+\.?\d{0,2})/i);
+    if (priceTaxTotal) return parseFloat(priceTaxTotal[1]);
 
-    for (const p of totalPatterns) {
-      const matches = [...text.matchAll(new RegExp(p.source, 'gi'))];
+    // Priority 2: 合计/总计 (look for the LAST occurrence, which is usually the final total)
+    const totalKeywords = [
+      /[合总]\s*计[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*[（(]?\s*(\d+\.?\d{0,2})/g,
+      /总\s*额[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*[（(]?\s*(\d+\.?\d{0,2})/g,
+    ];
+    let lastTotal = null;
+    for (const p of totalKeywords) {
+      const matches = [...text.matchAll(p)];
       if (matches.length > 0) {
-        // Return the last match (usually the final total at bottom of receipt)
-        const last = matches[matches.length - 1];
-        const val = parseFloat(last[1]);
-        if (val > 0) return val;
+        const val = parseFloat(matches[matches.length - 1][1]);
+        if (val > 0) lastTotal = val;
       }
     }
+    if (lastTotal) return lastTotal;
 
-    // Priority 2: Explicit currency symbols
+    // Priority 3: 应收/应付
+    const payPatterns = [
+      /应\s*收[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
+      /应\s*付[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/,
+    ];
+    for (const p of payPatterns) {
+      const m = text.match(p);
+      if (m) return parseFloat(m[1]);
+    }
+
+    // Priority 4: ¥ symbol - pick the largest (most likely total)
     const currencyMatches = [...text.matchAll(/[￥¥]\s*(\d+\.?\d{0,2})/g)];
     if (currencyMatches.length > 0) {
-      // Return the largest one (most likely the total)
       const values = currencyMatches.map(m => parseFloat(m[1])).filter(v => v > 0);
       if (values.length > 0) return Math.max(...values);
     }
 
-    // Priority 3: 金额 keyword
+    // Priority 5: 金额 keyword
     const amountMatch = text.match(/金额[（(￥¥]?\s*[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/);
     if (amountMatch) return parseFloat(amountMatch[1]);
 
-    // Priority 4: Standalone decimal numbers - pick the largest reasonable one
+    // Priority 6: English keywords
+    const enPatterns = [/Amount[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/i, /Total[：:]*\s*[￥¥]?\s*(\d+\.?\d{0,2})/i];
+    for (const p of enPatterns) {
+      const m = text.match(p);
+      if (m) return parseFloat(m[1]);
+    }
+
+    // Priority 7: Standalone decimal numbers - pick the largest
     const allNums = [...text.matchAll(/\b(\d+\.?\d{0,2})\b/g)];
     if (allNums.length > 0) {
       const values = allNums.map(m => parseFloat(m[1])).filter(v => v > 0 && v < 1000000);
