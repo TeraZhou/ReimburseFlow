@@ -47,22 +47,28 @@ const MoneyUtil = {
 };
 
 const CsvUtil = {
-  generate(transactions, categories) {
+  generateTransactions(transactions, categories) {
     const catMap = {};
     categories.forEach(c => catMap[c.id] = c.name);
 
-    const header = '日期,分类,金额,备注,是否有凭证';
+    const header = '日期,分类,金额,公司抬头,备注,报销状态,是否有凭证';
     const rows = transactions.map(t => {
       const catName = catMap[t.category_id] || '未知';
       const hasReceipt = t.receipt_uris && t.receipt_uris.length > 0 ? '是' : '否';
       const desc = (t.description || '').replace(/"/g, '""');
-      return `${DateUtil.format(t.transaction_date)},${catName},${MoneyUtil.format(t.amount)},"${desc}",${hasReceipt}`;
+      const company = (t.company_title || '').replace(/"/g, '""');
+      const status = t.is_reimbursed ? '已报销' : '未报销';
+      return `${DateUtil.format(t.transaction_date)},${catName},${MoneyUtil.format(t.amount)},"${company}","${desc}",${status},${hasReceipt}`;
     });
     return '\uFEFF' + header + '\n' + rows.join('\n');
   },
 
-  download(transactions, categories) {
-    const csv = this.generate(transactions, categories);
+  downloadTransactions(transactions, categories) {
+    if (transactions.length === 0) {
+      showToast('暂无交易记录可导出');
+      return;
+    }
+    const csv = this.generateTransactions(transactions, categories);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -72,6 +78,46 @@ const CsvUtil = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    showToast('交易记录导出成功');
+  },
+
+  generateInvoices(invoices) {
+    const header = '发票号码,金额,开票日期,公司抬头,销售方名称,报销状态,备注';
+    const rows = invoices.map(inv => {
+      const number = (inv.invoice_number || '').replace(/"/g, '""');
+      const company = (inv.company_title || '').replace(/"/g, '""');
+      const seller = (inv.seller_name || '').replace(/"/g, '""');
+      const remarks = (inv.remarks || '').replace(/"/g, '""');
+      const status = inv.is_reimbursed ? '已报销' : '未报销';
+      return `"${number}",${MoneyUtil.format(inv.amount)},${DateUtil.format(inv.invoice_date)},"${company}","${seller}",${status},"${remarks}"`;
+    });
+    return '\uFEFF' + header + '\n' + rows.join('\n');
+  },
+
+  downloadInvoices(invoices) {
+    if (invoices.length === 0) {
+      showToast('暂无发票记录可导出');
+      return;
+    }
+    const csv = this.generateInvoices(invoices);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `发票记录_${DateUtil.format(Date.now())}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('发票记录导出成功');
+  },
+
+  // Legacy alias for backward compatibility
+  generate(transactions, categories) {
+    return this.generateTransactions(transactions, categories);
+  },
+  download(transactions, categories) {
+    return this.downloadTransactions(transactions, categories);
   }
 };
 

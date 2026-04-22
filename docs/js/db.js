@@ -1,6 +1,6 @@
 // ===== IndexedDB Database Layer =====
 const DB_NAME = 'ReimburseFlowDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance = null;
 
@@ -11,6 +11,7 @@ function openDB() {
 
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
+      const oldVersion = event.oldVersion;
 
       // Category table
       if (!db.objectStoreNames.contains('category')) {
@@ -25,6 +26,28 @@ function openDB() {
         txStore.createIndex('category_id', 'category_id');
         txStore.createIndex('transaction_date', 'transaction_date');
         txStore.createIndex('created_at', 'created_at');
+      }
+
+      // Transaction table: v1 -> v2, add is_reimbursed and reimbursed_at
+      if (oldVersion < 2 && db.objectStoreNames.contains('transaction')) {
+        const txStore = event.target.transaction.objectStore('transaction');
+        if (!txStore.indexNames.contains('is_reimbursed')) {
+          txStore.createIndex('is_reimbursed', 'is_reimbursed');
+        }
+        // Migrate existing records: set default is_reimbursed = 0
+        const cursorReq = txStore.openCursor();
+        cursorReq.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            const record = cursor.value;
+            if (record.is_reimbursed === undefined) {
+              record.is_reimbursed = 0;
+              record.reimbursed_at = null;
+              cursor.update(record);
+            }
+            cursor.continue();
+          }
+        };
       }
 
       // Invoice table

@@ -158,6 +158,73 @@ html, body {
   color: var(--danger);
 }
 
+/* ===== Overview Section (new) ===== */
+.overview-section {
+  padding: 4px 0;
+}
+
+.overview-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #F1F3F4;
+}
+
+.overview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.overview-row.sub {
+  padding-left: 12px;
+}
+
+.overview-row .overview-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.overview-row .overview-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.overview-row .overview-value.reimbursed {
+  color: var(--success);
+}
+
+.overview-row .overview-value.unreimbursed {
+  color: #E37400;
+}
+
+/* ===== Sub Group Header ===== */
+.sub-group-header {
+  padding: 6px 16px 6px 32px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #FAFAFA;
+  font-weight: 500;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ===== Dimension Selector ===== */
+.dim-select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.btn-cancel {
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
 /* ===== Quick Actions ===== */
 .quick-actions {
   display: grid;

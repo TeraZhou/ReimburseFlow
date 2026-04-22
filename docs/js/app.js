@@ -5,8 +5,31 @@ let autoOpenCamera = false; // Global flag for camera shortcut
 async function init() {
   await openDB();
   await initDefaultData();
+  await requestPersistentStorage();
   window.addEventListener('hashchange', route);
   route();
+}
+
+// Request persistent storage to prevent browser from clearing IndexedDB
+async function requestPersistentStorage() {
+  if (navigator.storage && navigator.storage.persist) {
+    try {
+      const granted = await navigator.storage.persist();
+      if (!granted) {
+        // Check if we should show a one-time hint
+        const hintKey = 'rf_persist_hint_shown';
+        if (!localStorage.getItem(hintKey)) {
+          // Will show hint after first page render
+          setTimeout(() => {
+            showToast('提示：添加到主屏幕可防止数据丢失', 4000);
+            localStorage.setItem(hintKey, '1');
+          }, 1500);
+        }
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+  }
 }
 
 function route() {
@@ -63,12 +86,66 @@ function route() {
   }
 }
 
+// ===== EXPORT MODAL =====
+function showExportModal() {
+  const existing = document.getElementById('export-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'export-modal';
+  modal.className = 'modal active';
+  modal.innerHTML = `
+    <div class="modal-backdrop" onclick="this.parentElement.remove()"></div>
+    <div class="confirm-box" style="max-width:300px">
+      <p style="font-size:16px;font-weight:600;margin-bottom:16px;">选择导出内容</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="btn btn-primary" id="export-tx-btn" style="width:100%">导出交易记录</button>
+        <button class="btn btn-outline" id="export-inv-btn" style="width:100%">导出发票记录</button>
+        <button class="btn btn-cancel" onclick="this.closest('.modal').remove()" style="width:100%">取消</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  document.getElementById('export-tx-btn').addEventListener('click', async () => {
+    modal.remove();
+    const transactions = await TransactionService.getAll();
+    const cats = await CategoryService.getAll();
+    CsvUtil.downloadTransactions(transactions, cats);
+  });
+
+  document.getElementById('export-inv-btn').addEventListener('click', async () => {
+    modal.remove();
+    const invoices = await InvoiceService.getAll();
+    CsvUtil.downloadInvoices(invoices);
+  });
+}
+
 // ===== HOME PAGE =====
 async function renderHomePage(container) {
-  const monthTotal = await TransactionService.getThisMonthTotal();
-  const invoiceUnreimbursed = await InvoiceService.getUnreimbursedTotal();
-  const recent = await TransactionService.getRecent(5);
-  const categories = await CategoryService.getAll();
+  // Fetch all data in parallel
+  const [
+    monthTxTotal, monthTxReimbursed, monthTxUnreimbursed,
+    monthInvTotal, monthInvReimbursed, monthInvUnreimbursed,
+    allTxTotal, allTxReimbursed, allTxUnreimbursed,
+    allInvTotal, allInvReimbursed, allInvUnreimbursed,
+    recent, categories
+  ] = await Promise.all([
+    TransactionService.getThisMonthTotal(),
+    TransactionService.getThisMonthReimbursedTotal(),
+    TransactionService.getThisMonthUnreimbursedTotal(),
+    InvoiceService.getThisMonthTotal(),
+    InvoiceService.getThisMonthReimbursedTotal(),
+    InvoiceService.getThisMonthUnreimbursedTotal(),
+    TransactionService.getAllTotal(),
+    TransactionService.getAllReimbursedTotal(),
+    TransactionService.getAllUnreimbursedTotal(),
+    InvoiceService.getAllTotal(),
+    InvoiceService.getAllReimbursedTotal(),
+    InvoiceService.getAllUnreimbursedTotal(),
+    TransactionService.getRecent(5),
+    CategoryService.getAll()
+  ]);
 
   const catMap = {};
   categories.forEach(c => catMap[c.id] = c.name);
@@ -80,14 +157,67 @@ async function renderHomePage(container) {
     </div>
     <div class="card" style="margin-top: -8px; border-radius: 16px 16px 12px 12px;">
       <div class="card-title">本月概览</div>
-      <div class="overview-card">
-        <div class="overview-item">
-          <div class="label">本月交易</div>
-          <div class="amount">${MoneyUtil.format(monthTotal)}</div>
+      <div class="overview-section">
+        <div class="overview-section-title">交易</div>
+        <div class="overview-row">
+          <span class="overview-label">本月交易总额</span>
+          <span class="overview-value">${MoneyUtil.format(monthTxTotal)}</span>
         </div>
-        <div class="overview-item">
-          <div class="label">未报销发票</div>
-          <div class="amount">${MoneyUtil.format(invoiceUnreimbursed)}</div>
+        <div class="overview-row sub">
+          <span class="overview-label">已报销</span>
+          <span class="overview-value reimbursed">${MoneyUtil.format(monthTxReimbursed)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">未报销</span>
+          <span class="overview-value unreimbursed">${MoneyUtil.format(monthTxUnreimbursed)}</span>
+        </div>
+      </div>
+      <div class="overview-section" style="margin-top:12px">
+        <div class="overview-section-title">发票</div>
+        <div class="overview-row">
+          <span class="overview-label">本月发票总额</span>
+          <span class="overview-value">${MoneyUtil.format(monthInvTotal)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">已报销</span>
+          <span class="overview-value reimbursed">${MoneyUtil.format(monthInvReimbursed)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">未报销</span>
+          <span class="overview-value unreimbursed">${MoneyUtil.format(monthInvUnreimbursed)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">历史概览</div>
+      <div class="overview-section">
+        <div class="overview-section-title">交易</div>
+        <div class="overview-row">
+          <span class="overview-label">历史交易总额</span>
+          <span class="overview-value">${MoneyUtil.format(allTxTotal)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">已报销</span>
+          <span class="overview-value reimbursed">${MoneyUtil.format(allTxReimbursed)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">未报销</span>
+          <span class="overview-value unreimbursed">${MoneyUtil.format(allTxUnreimbursed)}</span>
+        </div>
+      </div>
+      <div class="overview-section" style="margin-top:12px">
+        <div class="overview-section-title">发票</div>
+        <div class="overview-row">
+          <span class="overview-label">历史发票总额</span>
+          <span class="overview-value">${MoneyUtil.format(allInvTotal)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">已报销</span>
+          <span class="overview-value reimbursed">${MoneyUtil.format(allInvReimbursed)}</span>
+        </div>
+        <div class="overview-row sub">
+          <span class="overview-label">未报销</span>
+          <span class="overview-value unreimbursed">${MoneyUtil.format(allInvUnreimbursed)}</span>
         </div>
       </div>
     </div>
@@ -122,17 +252,8 @@ async function renderHomePage(container) {
     </div>
   `;
 
-  // Export button handler
-  document.getElementById('export-btn').addEventListener('click', async () => {
-    const transactions = await TransactionService.getAll();
-    const cats = await CategoryService.getAll();
-    if (transactions.length === 0) {
-      showToast('暂无交易记录可导出');
-      return;
-    }
-    CsvUtil.download(transactions, cats);
-    showToast('导出成功');
-  });
+  // Export button handler - show modal
+  document.getElementById('export-btn').addEventListener('click', showExportModal);
 
   // Photo shortcut - set flag then navigate once
   document.getElementById('photo-shortcut-btn').addEventListener('click', () => {
@@ -148,63 +269,152 @@ async function renderTransactionListPage(container) {
   const catMap = {};
   categories.forEach(c => catMap[c.id] = c.name);
 
-  let filterCatId = null;
+  // Multi-dimension filter state
+  let dim1 = 'category'; // primary group dimension
+  let dim2 = 'month';    // secondary group dimension
+  const dimensions = [
+    { key: 'category', label: '费用类别' },
+    { key: 'month', label: '日期' },
+    { key: 'company', label: '公司抬头' }
+  ];
+
+  function getDimensionValue(t, dim) {
+    if (dim === 'category') return catMap[t.category_id] || '未知';
+    if (dim === 'month') return DateUtil.formatMonth(t.transaction_date);
+    if (dim === 'company') return t.company_title || '未填写';
+    return '未知';
+  }
 
   function renderList() {
-    const filtered = filterCatId ? allTransactions.filter(t => t.category_id === filterCatId) : allTransactions;
-    const grouped = TransactionService.groupByMonth(filtered);
-    const total = filtered.reduce((s, t) => s + t.amount, 0);
+    // Group by dim1, then within each group group by dim2
+    const groups = {};
+    allTransactions.forEach(t => {
+      const key1 = getDimensionValue(t, dim1);
+      if (!groups[key1]) groups[key1] = {};
+      const key2 = getDimensionValue(t, dim2);
+      if (!groups[key1][key2]) groups[key1][key2] = [];
+      groups[key1][key2].push(t);
+    });
+
+    const total = safeSum(allTransactions);
+    const reimbursedTotal = safeSum(allTransactions.filter(t => t.is_reimbursed));
+    const unreimbursedTotal = safeSum(allTransactions.filter(t => !t.is_reimbursed));
+
+    // Build grouped display
+    let groupedHtml = '';
+    if (allTransactions.length === 0) {
+      groupedHtml = `
+        <div class="empty-state">
+          <div class="empty-icon">📋</div>
+          <div class="empty-text">暂无交易记录</div>
+          <button class="btn btn-primary" onclick="location.hash='#/transactions/add'">记一笔</button>
+        </div>`;
+    } else {
+      Object.entries(groups).forEach(([key1, subGroups]) => {
+        let groupTotal = 0;
+        Object.values(subGroups).forEach(items => {
+          groupTotal += safeSum(items);
+        });
+        groupedHtml += `<div class="group-header">${key1} <span style="float:right;font-size:13px;color:var(--text-secondary)">-${MoneyUtil.format(groupTotal)}</span></div>`;
+        Object.entries(subGroups).forEach(([key2, items]) => {
+          if (key1 !== key2) {
+            const subTotal = safeSum(items);
+            groupedHtml += `<div class="sub-group-header">${key2} <span style="float:right;font-size:12px;color:var(--text-secondary)">-${MoneyUtil.format(subTotal)}</span></div>`;
+          }
+          items.forEach(t => {
+            groupedHtml += renderTransactionItem(t, catMap);
+          });
+        });
+      });
+    }
 
     container.innerHTML = `
       <div class="page-header">
         <h1>交易记录</h1>
-        <button class="btn btn-primary btn-sm" onclick="location.hash='#/transactions/add'">+ 新增</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-outline btn-sm" id="tx-export-btn">导出</button>
+          <button class="btn btn-primary btn-sm" onclick="location.hash='#/transactions/add'">+ 新增</button>
+        </div>
       </div>
       <div class="filter-bar">
-        <button class="chip ${!filterCatId ? 'active' : ''}" data-cat="">全部</button>
-        ${categories.map(c => `<button class="chip ${filterCatId === c.id ? 'active' : ''}" data-cat="${c.id}">${c.name}</button>`).join('')}
-      </div>
-      <div id="tx-list-body">
-        ${filtered.length === 0 ? `
-          <div class="empty-state">
-            <div class="empty-icon">📋</div>
-            <div class="empty-text">暂无交易记录</div>
-            <button class="btn btn-primary" onclick="location.hash='#/transactions/add'">记一笔</button>
+        ${dimensions.map(d => `
+          <div style="display:flex;align-items:center;gap:4px;">
+            <span style="font-size:11px;color:var(--text-secondary)">${d.label}:</span>
+            <select class="dim-select" data-dim="${d.key}" style="font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg);">
+              ${dimensions.map(dd => `<option value="${dd.key}" ${(d.key === dim1 && dd.key === dim1) || (d.key === dim2 && dd.key === dim2) ? 'selected' : ''}>${dd.label}</option>`).join('')}
+            </select>
           </div>
-        ` : Object.entries(grouped).map(([month, items]) => `
-          <div class="group-header">${month}</div>
-          ${items.map(t => `
-            <div class="transaction-item" onclick="location.hash='#/transactions/detail/${t.id}'">
-              <div class="t-left">
-                <div class="t-category">${catMap[t.category_id] || '未知'}</div>
-                <div class="t-desc">${t.description || ''}</div>
-              </div>
-              <div class="t-right">
-                <div class="t-amount">-${MoneyUtil.format(t.amount)}</div>
-                <div class="t-date">${DateUtil.formatShort(t.transaction_date)} ${t.receipt_uris && t.receipt_uris.length ? '<span class="t-receipt">📷</span>' : ''}</div>
-              </div>
-            </div>
-          `).join('')}
         `).join('')}
       </div>
-      ${filtered.length > 0 ? `
-        <div class="summary-bar">
-          合计: <span class="total-amount">-${MoneyUtil.format(total)}</span> (${filtered.length}笔)
-        </div>
-      ` : ''}
+      <div class="summary-bar" style="flex-wrap:wrap;gap:4px 12px;">
+        <span>合计: <span class="total-amount">-${MoneyUtil.format(total)}</span></span>
+        <span style="font-size:12px;color:var(--text-secondary)">已报销: ${MoneyUtil.format(reimbursedTotal)}</span>
+        <span style="font-size:12px;color:var(--text-secondary)">未报销: ${MoneyUtil.format(unreimbursedTotal)}</span>
+      </div>
+      <div id="tx-list-body">
+        ${groupedHtml}
+      </div>
     `;
 
-    // Bind filter chips
-    container.querySelectorAll('.chip[data-cat]').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const val = chip.dataset.cat;
-        filterCatId = val ? parseInt(val) : null;
+    // Bind dimension selectors
+    container.querySelectorAll('.dim-select').forEach(select => {
+      select.addEventListener('change', () => {
+        const dimKey = select.dataset.dim;
+        const val = select.value;
+        if (dimKey === dimensions[0].key) dim1 = val;
+        else dim2 = val;
+        // Ensure dim1 != dim2
+        if (dim1 === dim2) {
+          const other = dimensions.find(d => d.key !== dim1);
+          if (dimKey === dimensions[0].key) dim2 = other.key;
+          else dim1 = other.key;
+        }
         renderList();
       });
+    });
+
+    // Bind toggle reimbursed
+    container.querySelectorAll('[data-tx-action="toggle"]').forEach(badge => {
+      badge.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const txId = parseInt(badge.dataset.id);
+        await TransactionService.toggleReimbursed(txId);
+        // Refresh data and re-render
+        const updated = await TransactionService.getAll();
+        allTransactions.length = 0;
+        updated.forEach(t => allTransactions.push(t));
+        renderList();
+      });
+    });
+
+    // Export button
+    document.getElementById('tx-export-btn').addEventListener('click', async () => {
+      const txs = await TransactionService.getAll();
+      const cats = await CategoryService.getAll();
+      CsvUtil.downloadTransactions(txs, cats);
     });
   }
 
   renderList();
+}
+
+function renderTransactionItem(t, catMap) {
+  return `
+    <div class="transaction-item" onclick="location.hash='#/transactions/detail/${t.id}'">
+      <div class="t-left">
+        <div class="t-category">${catMap[t.category_id] || '未知'}</div>
+        <div class="t-desc">${t.description || ''}</div>
+      </div>
+      <div class="t-right">
+        <div class="t-amount">-${MoneyUtil.format(t.amount)}</div>
+        <div class="t-date">${DateUtil.formatShort(t.transaction_date)} ${t.receipt_uris && t.receipt_uris.length ? '<span class="t-receipt">📷</span>' : ''}</div>
+        <span class="badge ${t.is_reimbursed ? 'badge-reimbursed' : 'badge-unreimbursed'}"
+          data-id="${t.id}" data-tx-action="toggle" style="font-size:11px;padding:1px 6px;">
+          ${t.is_reimbursed ? '已报销 ✓' : '未报销'}
+        </span>
+      </div>
+    </div>
+  `;
 }
 
 // ===== TRANSACTION ADD/EDIT PAGE =====
@@ -339,6 +549,8 @@ async function renderTransactionAddPage(container, editId = null) {
         company_title: companyTitle,
         receipt_uris: receiptFiles,
         is_from_ocr: ocrResult && ocrResult.success ? 1 : 0,
+        is_reimbursed: transaction ? transaction.is_reimbursed : 0,
+        reimbursed_at: transaction ? transaction.reimbursed_at : null,
       };
 
       if (isEdit) {
@@ -466,6 +678,9 @@ async function renderTransactionDetailPage(container, id) {
       <div style="text-align:center; margin-bottom:16px;">
         <div style="font-size:32px; font-weight:700; color:var(--danger);">-${MoneyUtil.format(transaction.amount)}</div>
         <div style="font-size:14px; color:var(--text-secondary); margin-top:4px;">${catName}</div>
+        <span class="badge ${transaction.is_reimbursed ? 'badge-reimbursed' : 'badge-unreimbursed'}" id="toggle-status" style="margin-top:8px; cursor:pointer">
+          ${transaction.is_reimbursed ? '已报销 ✓' : '未报销'}
+        </span>
       </div>
       <div class="detail-row">
         <span class="detail-label">日期</span>
@@ -496,6 +711,11 @@ async function renderTransactionDetailPage(container, id) {
     </div>
   `;
 
+  document.getElementById('toggle-status').addEventListener('click', async () => {
+    await TransactionService.toggleReimbursed(id);
+    renderTransactionDetailPage(container, id);
+  });
+
   document.getElementById('edit-btn').addEventListener('click', () => {
     location.hash = `#/transactions/edit/${id}`;
   });
@@ -521,7 +741,10 @@ async function renderInvoiceListPage(container) {
     container.innerHTML = `
       <div class="page-header">
         <h1>发票管理</h1>
-        <button class="btn btn-primary btn-sm" onclick="location.hash='#/invoices/add'">+ 新增</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-outline btn-sm" id="inv-export-btn">导出</button>
+          <button class="btn btn-primary btn-sm" onclick="location.hash='#/invoices/add'">+ 新增</button>
+        </div>
       </div>
       <div class="filter-bar">
         <button class="chip ${statusFilter === 'all' ? 'active' : ''}" data-status="all">全部</button>
@@ -574,6 +797,12 @@ async function renderInvoiceListPage(container) {
         await InvoiceService.toggleReimbursed(invId);
         renderList();
       });
+    });
+
+    // Export button
+    document.getElementById('inv-export-btn').addEventListener('click', async () => {
+      const invs = await InvoiceService.getAll();
+      CsvUtil.downloadInvoices(invs);
     });
   }
 
@@ -814,6 +1043,7 @@ async function renderInvoiceDetailPage(container, id) {
     <div class="page-header">
       <button class="back-btn" onclick="history.back()">← 返回</button>
       <div class="header-actions">
+        <button class="btn btn-outline btn-sm" id="inv-download-img-btn">下载图片</button>
         <button class="btn btn-outline btn-sm" id="inv-edit-btn">编辑</button>
         <button class="btn btn-danger btn-sm" id="inv-delete-btn">删除</button>
       </div>
@@ -845,6 +1075,10 @@ async function renderInvoiceDetailPage(container, id) {
           <span class="detail-value">${invoice.seller_name}</span>
         </div>
       ` : ''}
+      <div class="detail-row">
+        <span class="detail-label">报销状态</span>
+        <span class="detail-value">${invoice.is_reimbursed ? '已报销' : '未报销'}</span>
+      </div>
       ${invoice.remarks ? `
         <div class="detail-row">
           <span class="detail-label">备注</span>
@@ -861,6 +1095,22 @@ async function renderInvoiceDetailPage(container, id) {
       ` : ''}
     </div>
   `;
+
+  // Download image button
+  document.getElementById('inv-download-img-btn').addEventListener('click', () => {
+    if (!invoice.image_uri) {
+      showToast('无图片可下载');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = invoice.image_uri;
+    const number = invoice.invoice_number || invoice.id;
+    a.download = `发票_${number}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('图片下载成功');
+  });
 
   document.getElementById('toggle-status').addEventListener('click', async () => {
     await InvoiceService.toggleReimbursed(id);

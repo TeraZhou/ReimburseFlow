@@ -44,7 +44,7 @@ const InvoiceService = {
 
   async getUnreimbursedTotal() {
     const all = await this.getFiltered('unreimbursed');
-    return all.reduce((sum, i) => sum + i.amount, 0);
+    return safeSum(all);
   },
 
   async getThisMonthTotal() {
@@ -52,7 +52,37 @@ const InvoiceService = {
     const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
     const all = await this.getAll();
-    return all.filter(i => i.invoice_date >= start && i.invoice_date <= end)
-              .reduce((sum, i) => sum + i.amount, 0);
+    return safeSum(all.filter(i => i.invoice_date >= start && i.invoice_date <= end));
+  },
+
+  async getThisMonthReimbursedTotal() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    const all = await this.getAll();
+    return safeSum(all.filter(i => i.invoice_date >= start && i.invoice_date <= end && i.is_reimbursed));
+  },
+
+  async getThisMonthUnreimbursedTotal() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    const all = await this.getAll();
+    return safeSum(all.filter(i => i.invoice_date >= start && i.invoice_date <= end && !i.is_reimbursed));
+  },
+
+  async getAllTotal() {
+    const all = await this.getAll();
+    return safeSum(all);
+  },
+
+  async getAllReimbursedTotal() {
+    const all = await this.getAll();
+    return safeSum(all.filter(i => i.is_reimbursed));
+  },
+
+  async getAllUnreimbursedTotal() {
+    const all = await this.getAll();
+    return safeSum(all.filter(i => !i.is_reimbursed));
   }
 };
