@@ -278,6 +278,14 @@ async function renderTransactionListPage(container) {
     { key: 'company', label: '公司抬头' }
   ];
 
+  // Date filter state
+  let dateFrom = '';
+  let dateTo = '';
+
+  // Batch mode state
+  let batchMode = false;
+  let selectedIds = new Set();
+
   function getDimensionValue(t, dim) {
     if (dim === 'category') return catMap[t.category_id] || '未知';
     if (dim === 'month') return DateUtil.formatMonth(t.transaction_date);
@@ -285,10 +293,25 @@ async function renderTransactionListPage(container) {
     return '未知';
   }
 
+  function getFilteredTransactions() {
+    let filtered = allTransactions;
+    if (dateFrom) {
+      const fromTs = DateUtil.parse(dateFrom);
+      if (fromTs) filtered = filtered.filter(t => t.transaction_date >= fromTs);
+    }
+    if (dateTo) {
+      const toTs = new Date(new Date(dateTo).getTime() + 86400000 - 1).getTime();
+      if (toTs) filtered = filtered.filter(t => t.transaction_date <= toTs);
+    }
+    return filtered;
+  }
+
   function renderList() {
+    const transactions = getFilteredTransactions();
+
     // Group by dim1, then within each group group by dim2
     const groups = {};
-    allTransactions.forEach(t => {
+    transactions.forEach(t => {
       const key1 = getDimensionValue(t, dim1);
       if (!groups[key1]) groups[key1] = {};
       const key2 = getDimensionValue(t, dim2);
@@ -296,13 +319,13 @@ async function renderTransactionListPage(container) {
       groups[key1][key2].push(t);
     });
 
-    const total = safeSum(allTransactions);
-    const reimbursedTotal = safeSum(allTransactions.filter(t => t.is_reimbursed));
-    const unreimbursedTotal = safeSum(allTransactions.filter(t => !t.is_reimbursed));
+    const total = safeSum(transactions);
+    const reimbursedTotal = safeSum(transactions.filter(t => t.is_reimbursed));
+    const unreimbursedTotal = safeSum(transactions.filter(t => !t.is_reimbursed));
 
     // Build grouped display
     let groupedHtml = '';
-    if (allTransactions.length === 0) {
+    if (transactions.length === 0) {
       groupedHtml = `
         <div class="empty-state">
           <div class="empty-icon">📋</div>
@@ -322,7 +345,7 @@ async function renderTransactionListPage(container) {
             groupedHtml += `<div class="sub-group-header">${key2} <span style="float:right;font-size:12px;color:var(--text-secondary)">-${MoneyUtil.format(subTotal)}</span></div>`;
           }
           items.forEach(t => {
-            groupedHtml += renderTransactionItem(t, catMap);
+            groupedHtml += renderTransactionItem(t, catMap, batchMode, selectedIds.has(t.id));
           });
         });
       });
@@ -340,7 +363,7 @@ async function renderTransactionListPage(container) {
           <button class="btn btn-primary btn-sm" onclick="location.hash='#/transactions/add'">+ 新增</button>
         </div>
       </div>
-      <div class="filter-bar" style="gap:12px;">
+      <div class="filter-bar" style="flex-wrap:wrap;gap:8px 12px;">
         <div style="display:flex;align-items:center;gap:4px;">
           <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">按</span>
           <select id="dim1-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
@@ -354,7 +377,25 @@ async function renderTransactionListPage(container) {
             ${dim2Options.map(d => `<option value="${d.key}" ${d.key === dim2 ? 'selected' : ''}>${d.label}</option>`).join('')}
           </select>
         </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">起始</span>
+          <input type="date" id="tx-date-from" value="${dateFrom}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">截止</span>
+          <input type="date" id="tx-date-to" value="${dateTo}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+        </div>
+        <button class="btn ${batchMode ? 'btn-primary' : 'btn-outline'} btn-sm" id="tx-batch-toggle">${batchMode ? '退出管理' : '管理'}</button>
       </div>
+      ${batchMode ? `
+        <div class="batch-toolbar">
+          <span class="batch-info">已选 ${selectedIds.size} 项</span>
+          <button class="btn btn-outline btn-sm" id="tx-select-all">${selectedIds.size === transactions.length && transactions.length > 0 ? '取消全选' : '全选'}</button>
+          <button class="btn btn-outline btn-sm" id="tx-batch-reimbursed">标记已报销</button>
+          <button class="btn btn-outline btn-sm" id="tx-batch-unreimbursed">标记未报销</button>
+          <button class="btn btn-danger btn-sm" id="tx-batch-delete">删除</button>
+        </div>
+      ` : ''}
       <div class="summary-bar" style="flex-wrap:wrap;gap:4px 12px;">
         <span>合计: <span class="total-amount">-${MoneyUtil.format(total)}</span></span>
         <span style="font-size:12px;color:var(--text-secondary)">已报销: ${MoneyUtil.format(reimbursedTotal)}</span>
@@ -384,19 +425,126 @@ async function renderTransactionListPage(container) {
       renderList();
     });
 
-    // Bind toggle reimbursed
-    container.querySelectorAll('[data-tx-action="toggle"]').forEach(badge => {
-      badge.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const txId = parseInt(badge.dataset.id);
-        await TransactionService.toggleReimbursed(txId);
+    // Bind date filters
+    document.getElementById('tx-date-from').addEventListener('change', function() {
+      dateFrom = this.value;
+      renderList();
+    });
+    document.getElementById('tx-date-to').addEventListener('change', function() {
+      dateTo = this.value;
+      renderList();
+    });
+
+    // Bind batch mode toggle
+    document.getElementById('tx-batch-toggle').addEventListener('click', () => {
+      batchMode = !batchMode;
+      if (!batchMode) selectedIds.clear();
+      renderList();
+    });
+
+    // Bind batch operations
+    if (batchMode) {
+      // Select all
+      document.getElementById('tx-select-all').addEventListener('click', () => {
+        const transactions = getFilteredTransactions();
+        if (selectedIds.size === transactions.length) {
+          selectedIds.clear();
+        } else {
+          transactions.forEach(t => selectedIds.add(t.id));
+        }
+        renderList();
+      });
+
+      // Batch mark reimbursed
+      document.getElementById('tx-batch-reimbursed').addEventListener('click', async () => {
+        if (selectedIds.size === 0) { showToast('请先选择记录'); return; }
+        for (const id of selectedIds) {
+          const tx = await TransactionService.getById(id);
+          if (tx && !tx.is_reimbursed) {
+            await TransactionService.toggleReimbursed(id);
+          }
+        }
         GistBackupService.autoBackup();
         const updated = await TransactionService.getAll();
         allTransactions.length = 0;
         updated.forEach(t => allTransactions.push(t));
+        selectedIds.clear();
+        batchMode = false;
+        showToast('已标记为已报销');
         renderList();
       });
-    });
+
+      // Batch mark unreimbursed
+      document.getElementById('tx-batch-unreimbursed').addEventListener('click', async () => {
+        if (selectedIds.size === 0) { showToast('请先选择记录'); return; }
+        for (const id of selectedIds) {
+          const tx = await TransactionService.getById(id);
+          if (tx && tx.is_reimbursed) {
+            await TransactionService.toggleReimbursed(id);
+          }
+        }
+        GistBackupService.autoBackup();
+        const updated = await TransactionService.getAll();
+        allTransactions.length = 0;
+        updated.forEach(t => allTransactions.push(t));
+        selectedIds.clear();
+        batchMode = false;
+        showToast('已标记为未报销');
+        renderList();
+      });
+
+      // Batch delete
+      document.getElementById('tx-batch-delete').addEventListener('click', async () => {
+        if (selectedIds.size === 0) { showToast('请先选择记录'); return; }
+        const ok = await showConfirm(`确定删除选中的 ${selectedIds.size} 条记录吗？`);
+        if (!ok) return;
+        for (const id of selectedIds) {
+          await TransactionService.delete(id);
+        }
+        GistBackupService.autoBackup();
+        const updated = await TransactionService.getAll();
+        allTransactions.length = 0;
+        updated.forEach(t => allTransactions.push(t));
+        selectedIds.clear();
+        batchMode = false;
+        showToast('已删除');
+        renderList();
+      });
+    }
+
+    // Bind checkboxes in batch mode
+    if (batchMode) {
+      container.querySelectorAll('[data-tx-check]').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const txId = parseInt(cb.dataset.txCheck);
+          if (cb.checked) {
+            selectedIds.add(txId);
+          } else {
+            selectedIds.delete(txId);
+          }
+          // Update count without full re-render
+          const info = container.querySelector('.batch-info');
+          if (info) info.textContent = `已选 ${selectedIds.size} 项`;
+        });
+      });
+    }
+
+    // Bind toggle reimbursed (non-batch mode)
+    if (!batchMode) {
+      container.querySelectorAll('[data-tx-action="toggle"]').forEach(badge => {
+        badge.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const txId = parseInt(badge.dataset.id);
+          await TransactionService.toggleReimbursed(txId);
+          GistBackupService.autoBackup();
+          const updated = await TransactionService.getAll();
+          allTransactions.length = 0;
+          updated.forEach(t => allTransactions.push(t));
+          renderList();
+        });
+      });
+    }
 
     // Export button
     document.getElementById('tx-export-btn').addEventListener('click', async () => {
@@ -409,9 +557,13 @@ async function renderTransactionListPage(container) {
   renderList();
 }
 
-function renderTransactionItem(t, catMap) {
+function renderTransactionItem(t, catMap, batchMode = false, checked = false) {
+  const checkboxHtml = batchMode
+    ? `<input type="checkbox" class="tx-checkbox" data-tx-check="${t.id}" ${checked ? 'checked' : ''} onclick="event.stopPropagation()">`
+    : '';
   return `
-    <div class="transaction-item" onclick="location.hash='#/transactions/detail/${t.id}'">
+    <div class="transaction-item" ${batchMode ? '' : `onclick="location.hash='#/transactions/detail/${t.id}'"`}>
+      ${checkboxHtml}
       <div class="t-left">
         <div class="t-category">${catMap[t.category_id] || '未知'}</div>
         <div class="t-desc">${t.description || ''}</div>
