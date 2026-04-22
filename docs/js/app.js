@@ -270,8 +270,8 @@ async function renderTransactionListPage(container) {
   categories.forEach(c => catMap[c.id] = c.name);
 
   // Multi-dimension filter state
-  let dim1 = 'category'; // primary group dimension
-  let dim2 = 'month';    // secondary group dimension
+  let dim1 = 'category';
+  let dim2 = 'month';
   const dimensions = [
     { key: 'category', label: '费用类别' },
     { key: 'month', label: '日期' },
@@ -328,6 +328,10 @@ async function renderTransactionListPage(container) {
       });
     }
 
+    // Build dimension selector options (exclude the other dim's current value)
+    const dim1Options = dimensions.filter(d => d.key !== dim2);
+    const dim2Options = dimensions.filter(d => d.key !== dim1);
+
     container.innerHTML = `
       <div class="page-header">
         <h1>交易记录</h1>
@@ -336,15 +340,20 @@ async function renderTransactionListPage(container) {
           <button class="btn btn-primary btn-sm" onclick="location.hash='#/transactions/add'">+ 新增</button>
         </div>
       </div>
-      <div class="filter-bar">
-        ${dimensions.map(d => `
-          <div style="display:flex;align-items:center;gap:4px;">
-            <span style="font-size:11px;color:var(--text-secondary)">${d.label}:</span>
-            <select class="dim-select" data-dim="${d.key}" style="font-size:12px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg);">
-              ${dimensions.map(dd => `<option value="${dd.key}" ${(d.key === dim1 && dd.key === dim1) || (d.key === dim2 && dd.key === dim2) ? 'selected' : ''}>${dd.label}</option>`).join('')}
-            </select>
-          </div>
-        `).join('')}
+      <div class="filter-bar" style="gap:12px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">按</span>
+          <select id="dim1-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            ${dim1Options.map(d => `<option value="${d.key}" ${d.key === dim1 ? 'selected' : ''}>${d.label}</option>`).join('')}
+          </select>
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">汇总</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">子分组</span>
+          <select id="dim2-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            ${dim2Options.map(d => `<option value="${d.key}" ${d.key === dim2 ? 'selected' : ''}>${d.label}</option>`).join('')}
+          </select>
+        </div>
       </div>
       <div class="summary-bar" style="flex-wrap:wrap;gap:4px 12px;">
         <span>合计: <span class="total-amount">-${MoneyUtil.format(total)}</span></span>
@@ -356,21 +365,23 @@ async function renderTransactionListPage(container) {
       </div>
     `;
 
-    // Bind dimension selectors
-    container.querySelectorAll('.dim-select').forEach(select => {
-      select.addEventListener('change', () => {
-        const dimKey = select.dataset.dim;
-        const val = select.value;
-        if (dimKey === dimensions[0].key) dim1 = val;
-        else dim2 = val;
-        // Ensure dim1 != dim2
-        if (dim1 === dim2) {
-          const other = dimensions.find(d => d.key !== dim1);
-          if (dimKey === dimensions[0].key) dim2 = other.key;
-          else dim1 = other.key;
-        }
-        renderList();
-      });
+    // Bind dimension selectors - fixed logic
+    document.getElementById('dim1-select').addEventListener('change', function() {
+      dim1 = this.value;
+      if (dim1 === dim2) {
+        const other = dimensions.find(d => d.key !== dim1);
+        dim2 = other.key;
+      }
+      renderList();
+    });
+
+    document.getElementById('dim2-select').addEventListener('change', function() {
+      dim2 = this.value;
+      if (dim1 === dim2) {
+        const other = dimensions.find(d => d.key !== dim2);
+        dim1 = other.key;
+      }
+      renderList();
     });
 
     // Bind toggle reimbursed
@@ -379,7 +390,6 @@ async function renderTransactionListPage(container) {
         e.stopPropagation();
         const txId = parseInt(badge.dataset.id);
         await TransactionService.toggleReimbursed(txId);
-        // Refresh data and re-render
         const updated = await TransactionService.getAll();
         allTransactions.length = 0;
         updated.forEach(t => allTransactions.push(t));
@@ -733,36 +743,79 @@ async function renderTransactionDetailPage(container, id) {
 // ===== INVOICE LIST PAGE =====
 async function renderInvoiceListPage(container) {
   let statusFilter = 'all';
+  let dateFrom = '';
+  let dateTo = '';
 
   async function renderList() {
-    const invoices = await InvoiceService.getFiltered(statusFilter);
-    const unreimbursedTotal = await InvoiceService.getUnreimbursedTotal();
+    const allInvoices = await InvoiceService.getAll();
+
+    // Apply filters
+    let filtered = allInvoices;
+    if (statusFilter !== 'all') {
+      const val = statusFilter === 'reimbursed' ? 1 : 0;
+      filtered = filtered.filter(i => i.is_reimbursed === val);
+    }
+    if (dateFrom) {
+      const fromTs = DateUtil.parse(dateFrom);
+      if (fromTs) filtered = filtered.filter(i => i.invoice_date >= fromTs);
+    }
+    if (dateTo) {
+      const toTs = new Date(new Date(dateTo).getTime() + 86400000 - 1).getTime();
+      if (toTs) filtered = filtered.filter(i => i.invoice_date <= toTs);
+    }
+
+    const filteredTotal = safeSum(filtered);
+    const filteredReimbursed = safeSum(filtered.filter(i => i.is_reimbursed));
+    const filteredUnreimbursed = safeSum(filtered.filter(i => !i.is_reimbursed));
 
     container.innerHTML = `
       <div class="page-header">
         <h1>发票管理</h1>
         <div style="display:flex;gap:6px;">
+          <button class="btn btn-outline btn-sm" id="inv-batch-download-btn">下载附件</button>
           <button class="btn btn-outline btn-sm" id="inv-export-btn">导出</button>
           <button class="btn btn-primary btn-sm" onclick="location.hash='#/invoices/add'">+ 新增</button>
         </div>
       </div>
-      <div class="filter-bar">
-        <button class="chip ${statusFilter === 'all' ? 'active' : ''}" data-status="all">全部</button>
-        <button class="chip ${statusFilter === 'unreimbursed' ? 'active' : ''}" data-status="unreimbursed">未报销</button>
-        <button class="chip ${statusFilter === 'reimbursed' ? 'active' : ''}" data-status="reimbursed">已报销</button>
+      <div class="filter-bar" style="flex-wrap:wrap;gap:8px 12px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">状态</span>
+          <select id="inv-status-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>全部</option>
+            <option value="unreimbursed" ${statusFilter === 'unreimbursed' ? 'selected' : ''}>未报销</option>
+            <option value="reimbursed" ${statusFilter === 'reimbursed' ? 'selected' : ''}>已报销</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">起始</span>
+          <input type="date" id="inv-date-from" value="${dateFrom}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">截止</span>
+          <input type="date" id="inv-date-to" value="${dateTo}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+        </div>
       </div>
-      ${unreimbursedTotal > 0 ? `<div class="unreimbursed-total">未报销合计: ${MoneyUtil.format(unreimbursedTotal)}</div>` : ''}
+      <div class="summary-bar" style="flex-wrap:wrap;gap:4px 12px;">
+        <span>合计: <span class="total-amount">${MoneyUtil.format(filteredTotal)}</span> (${filtered.length}张)</span>
+        <span style="font-size:12px;color:var(--text-secondary)">已报销: ${MoneyUtil.format(filteredReimbursed)}</span>
+        <span style="font-size:12px;color:var(--text-secondary)">未报销: ${MoneyUtil.format(filteredUnreimbursed)}</span>
+      </div>
       <div id="inv-list-body">
-        ${invoices.length === 0 ? `
+        ${filtered.length === 0 ? `
           <div class="empty-state">
             <div class="empty-icon">🧾</div>
             <div class="empty-text">暂无发票</div>
             <button class="btn btn-primary" onclick="location.hash='#/invoices/add'">添加发票</button>
           </div>
-        ` : invoices.map(inv => `
+        ` : filtered.map(inv => {
+          const isPdf = inv.image_uri && inv.image_uri.startsWith('data:application/pdf');
+          return `
           <div class="invoice-card" onclick="location.hash='#/invoices/detail/${inv.id}'">
             <div class="invoice-top">
-              ${inv.image_uri ? `<img class="invoice-thumb" src="${inv.image_uri}" onclick="event.stopPropagation(); viewImage(this.src)">` : `<div class="invoice-thumb" style="display:flex;align-items:center;justify-content:center;font-size:20px">🧾</div>`}
+              ${inv.image_uri ? (isPdf
+                ? `<div class="invoice-thumb" style="display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--danger);font-weight:700;background:#FFF5F5;">PDF</div>`
+                : `<img class="invoice-thumb" src="${inv.image_uri}" onclick="event.stopPropagation(); viewImage(this.src)">`)
+              : `<div class="invoice-thumb" style="display:flex;align-items:center;justify-content:center;font-size:20px">🧾</div>`}
               <div class="invoice-info">
                 <div class="invoice-amount">${MoneyUtil.format(inv.amount)}</div>
                 <div class="invoice-company">${inv.company_title}</div>
@@ -777,16 +830,24 @@ async function renderInvoiceListPage(container) {
               </span>
             </div>
           </div>
-        `).join('')}
+        `}).join('')}
       </div>
     `;
 
-    // Bind filter chips
-    container.querySelectorAll('.chip[data-status]').forEach(chip => {
-      chip.addEventListener('click', () => {
-        statusFilter = chip.dataset.status;
-        renderList();
-      });
+    // Bind status filter
+    document.getElementById('inv-status-select').addEventListener('change', function() {
+      statusFilter = this.value;
+      renderList();
+    });
+
+    // Bind date filters
+    document.getElementById('inv-date-from').addEventListener('change', function() {
+      dateFrom = this.value;
+      renderList();
+    });
+    document.getElementById('inv-date-to').addEventListener('change', function() {
+      dateTo = this.value;
+      renderList();
     });
 
     // Bind toggle reimbursed
@@ -799,10 +860,34 @@ async function renderInvoiceListPage(container) {
       });
     });
 
+    // Batch download attachments
+    document.getElementById('inv-batch-download-btn').addEventListener('click', () => {
+      const withAttachment = filtered.filter(i => i.image_uri);
+      if (withAttachment.length === 0) {
+        showToast('当前筛选条件下无附件可下载');
+        return;
+      }
+      let delay = 0;
+      withAttachment.forEach(inv => {
+        setTimeout(() => {
+          const a = document.createElement('a');
+          a.href = inv.image_uri;
+          const isPdf = inv.image_uri.startsWith('data:application/pdf');
+          const ext = isPdf ? 'pdf' : 'jpg';
+          const name = inv.invoice_number || inv.id;
+          a.download = `发票_${name}.${ext}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }, delay);
+        delay += 500; // 500ms interval to avoid browser blocking
+      });
+      showToast(`正在下载 ${withAttachment.length} 个附件...`);
+    });
+
     // Export button
     document.getElementById('inv-export-btn').addEventListener('click', async () => {
-      const invs = await InvoiceService.getAll();
-      CsvUtil.downloadInvoices(invs);
+      CsvUtil.downloadInvoices(filtered);
     });
   }
 
@@ -815,6 +900,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
   const isEdit = !!invoice;
   let imageUri = invoice ? invoice.image_uri : null;
   let ocrResult = null;
+  let isPdfAttachment = imageUri ? imageUri.startsWith('data:application/pdf') : false;
 
   function render() {
     const defaultDate = invoice ? DateUtil.format(invoice.invoice_date) : DateUtil.format(Date.now());
@@ -823,6 +909,9 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
     const defaultCompany = invoice ? (invoice.company_title || '') : '';
     const defaultSeller = invoice ? (invoice.seller_name || '') : '';
     const defaultRemarks = invoice ? (invoice.remarks || '') : '';
+
+    // Determine if current attachment is an image (for OCR) or PDF
+    const canOcr = imageUri && !isPdfAttachment;
 
     container.innerHTML = `
       <div class="page-header">
@@ -841,7 +930,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
                 <a href="javascript:void(0)" id="view-ocr-text" style="margin-left:8px;color:inherit;text-decoration:underline;font-size:12px">查看原文</a>
               </div>
             `}
-            ${imageUri ? `
+            ${imageUri && !isPdfAttachment ? `
               <div style="margin-top:8px; text-align:center;">
                 <img src="${imageUri}" style="max-width:100%; max-height:200px; border-radius:8px; border:1px solid var(--border);"
                   onclick="viewImage(this.src)">
@@ -887,25 +976,30 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
         </div>
 
         <div class="form-group">
-          <label>发票图片</label>
+          <label>发票附件</label>
           <div class="receipt-area">
             ${imageUri ? `
-              <div class="receipt-thumb">
-                <img src="${imageUri}" onclick="viewImage('${imageUri.replace(/'/g, "\\'")}')">
+              <div class="receipt-thumb" style="position:relative;width:80px;height:80px;">
+                ${isPdfAttachment ? `
+                  <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#FFF5F5;border-radius:8px;color:var(--danger);font-weight:700;font-size:14px;">PDF</div>
+                ` : `
+                  <img src="${imageUri}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onclick="viewImage('${imageUri.replace(/'/g, "\\'")}')">
+                `}
                 <button class="remove-btn" id="remove-inv-img">×</button>
               </div>
             ` : ''}
             ${!imageUri ? `
               <button class="add-receipt-btn" id="add-inv-img">
                 <span style="font-size:20px">+</span>
-                <span>拍照/选图</span>
+                <span>选择文件</span>
               </button>
             ` : ''}
           </div>
-          <input type="file" id="inv-file-input" accept="image/*" style="display:none">
+          <input type="file" id="inv-file-input" accept="image/*,.pdf" style="display:none">
+          <div style="font-size:11px; color:var(--text-secondary); margin-top:4px;">支持 JPG / PNG / PDF 格式</div>
         </div>
 
-        ${imageUri && !ocrResult && !isEdit ? `
+        ${canOcr && !ocrResult && !isEdit ? `
           <div style="text-align:center; margin-top:8px;">
             <button class="btn btn-outline" id="inv-ocr-btn">🔍 识别发票内容</button>
             <div style="font-size:11px; color:var(--text-secondary); margin-top:6px;">提示：从相册选择清晰照片识别更准确</div>
@@ -955,7 +1049,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
       location.hash = '#/invoices';
     });
 
-    // Image upload with OCR
+    // Image/file upload
     const fileInput = document.getElementById('inv-file-input');
     const addImgBtn = document.getElementById('add-inv-img');
     if (addImgBtn) {
@@ -966,13 +1060,22 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
     if (fileInput) {
       fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
-        if (!file) return; // User cancelled - stays on form
+        if (!file) return;
         const dataURI = await fileToDataURI(file);
-        imageUri = await compressImage(dataURI);
 
-        // Auto-trigger OCR after taking photo
-        render();
-        await runOcr();
+        if (file.type === 'application/pdf') {
+          // PDF: store as-is, no compression, no OCR
+          imageUri = dataURI;
+          isPdfAttachment = true;
+          ocrResult = null;
+          render();
+        } else {
+          // Image: compress and auto-trigger OCR
+          imageUri = await compressImage(dataURI);
+          isPdfAttachment = false;
+          render();
+          await runOcr();
+        }
       });
     }
 
@@ -982,6 +1085,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         imageUri = null;
+        isPdfAttachment = false;
         ocrResult = null;
         render();
       });
@@ -1005,13 +1109,12 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
   }
 
   async function runOcr() {
-    if (!imageUri) return;
+    if (!imageUri || isPdfAttachment) return;
     const categories = await CategoryService.getAll();
 
     ocrResult = null;
     render();
 
-    // Add loading indicator
     const pageContent = container.querySelector('.form-page');
     if (pageContent) {
       const loadingDiv = document.createElement('div');
@@ -1087,30 +1190,46 @@ async function renderInvoiceDetailPage(container, id) {
       ` : ''}
       ${invoice.image_uri ? `
         <div class="detail-row" style="border:none">
-          <span class="detail-label">发票图片</span>
+          <span class="detail-label">${invoice.image_uri.startsWith('data:application/pdf') ? '发票附件' : '发票图片'}</span>
         </div>
-        <div class="detail-images">
-          <img src="${invoice.image_uri}" onclick="viewImage(this.src)">
-        </div>
+        ${invoice.image_uri.startsWith('data:application/pdf') ? `
+          <div style="padding:16px;text-align:center;background:#FFF5F5;border-radius:8px;margin-top:4px;">
+            <div style="font-size:32px;margin-bottom:8px;">📄</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">PDF 文件</div>
+            <button class="btn btn-primary btn-sm" id="download-pdf-btn">下载 PDF</button>
+          </div>
+        ` : `
+          <div class="detail-images">
+            <img src="${invoice.image_uri}" onclick="viewImage(this.src)">
+          </div>
+        `}
       ` : ''}
     </div>
   `;
 
-  // Download image button
-  document.getElementById('inv-download-img-btn').addEventListener('click', () => {
+  // Download image/PDF button
+  const downloadBtn = document.getElementById('inv-download-img-btn') || document.getElementById('download-pdf-btn');
+  const downloadFn = () => {
     if (!invoice.image_uri) {
-      showToast('无图片可下载');
+      showToast('无附件可下载');
       return;
     }
     const a = document.createElement('a');
     a.href = invoice.image_uri;
+    const isPdf = invoice.image_uri.startsWith('data:application/pdf');
+    const ext = isPdf ? 'pdf' : 'jpg';
     const number = invoice.invoice_number || invoice.id;
-    a.download = `发票_${number}.jpg`;
+    a.download = `发票_${number}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast('图片下载成功');
-  });
+    showToast('下载成功');
+  };
+
+  const invDownloadImgBtn = document.getElementById('inv-download-img-btn');
+  if (invDownloadImgBtn) invDownloadImgBtn.addEventListener('click', downloadFn);
+  const downloadPdfBtn = document.getElementById('download-pdf-btn');
+  if (downloadPdfBtn) downloadPdfBtn.addEventListener('click', downloadFn);
 
   document.getElementById('toggle-status').addEventListener('click', async () => {
     await InvoiceService.toggleReimbursed(id);
