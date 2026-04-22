@@ -390,6 +390,7 @@ async function renderTransactionListPage(container) {
         e.stopPropagation();
         const txId = parseInt(badge.dataset.id);
         await TransactionService.toggleReimbursed(txId);
+        GistBackupService.autoBackup();
         const updated = await TransactionService.getAll();
         allTransactions.length = 0;
         updated.forEach(t => allTransactions.push(t));
@@ -572,6 +573,7 @@ async function renderTransactionAddPage(container, editId = null) {
         await TransactionService.add(data);
         showToast('保存成功');
       }
+      GistBackupService.autoBackup();
       location.hash = '#/transactions';
     });
 
@@ -723,6 +725,7 @@ async function renderTransactionDetailPage(container, id) {
 
   document.getElementById('toggle-status').addEventListener('click', async () => {
     await TransactionService.toggleReimbursed(id);
+    GistBackupService.autoBackup();
     renderTransactionDetailPage(container, id);
   });
 
@@ -734,6 +737,7 @@ async function renderTransactionDetailPage(container, id) {
     const ok = await showConfirm('确定删除这条交易记录吗？');
     if (ok) {
       await TransactionService.delete(id);
+      GistBackupService.autoBackup();
       showToast('已删除');
       location.hash = '#/transactions';
     }
@@ -856,6 +860,7 @@ async function renderInvoiceListPage(container) {
         e.stopPropagation();
         const invId = parseInt(badge.dataset.id);
         await InvoiceService.toggleReimbursed(invId);
+        GistBackupService.autoBackup();
         renderList();
       });
     });
@@ -1046,6 +1051,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
         await InvoiceService.add(data);
         showToast('保存成功');
       }
+      GistBackupService.autoBackup();
       location.hash = '#/invoices';
     });
 
@@ -1233,6 +1239,7 @@ async function renderInvoiceDetailPage(container, id) {
 
   document.getElementById('toggle-status').addEventListener('click', async () => {
     await InvoiceService.toggleReimbursed(id);
+    GistBackupService.autoBackup();
     renderInvoiceDetailPage(container, id);
   });
 
@@ -1244,6 +1251,7 @@ async function renderInvoiceDetailPage(container, id) {
     const ok = await showConfirm('确定删除这张发票吗？');
     if (ok) {
       await InvoiceService.delete(id);
+      GistBackupService.autoBackup();
       showToast('已删除');
       location.hash = '#/invoices';
     }
@@ -1253,30 +1261,109 @@ async function renderInvoiceDetailPage(container, id) {
 // ===== CATEGORY MANAGE PAGE =====
 async function renderCategoryManagePage(container) {
   const categories = await CategoryService.getAll();
+  const savedToken = GistBackupService.getToken();
+  const maskedToken = savedToken ? savedToken.slice(0, 4) + '****' : '';
+  const lastBackup = GistBackupService.getLastBackup();
 
   container.innerHTML = `
     <div class="page-header">
       <button class="back-btn" onclick="location.hash='#/'">← 返回</button>
-      <h1>分类管理</h1>
+      <h1>设置</h1>
       <span></span>
     </div>
-    <div class="inline-input-row">
-      <input type="text" id="new-cat-input" placeholder="输入新分类名称">
-      <button class="btn btn-primary btn-sm" id="add-cat-btn">添加</button>
-    </div>
-    <div id="cat-list">
-      ${categories.map(c => `
-        <div class="category-item" data-id="${c.id}">
-          <span class="cat-name">${c.name}${c.is_default ? ' <span style="font-size:11px;color:var(--text-secondary)">内置</span>' : ''}</span>
-          <div class="cat-actions">
-            <button class="btn btn-outline btn-sm cat-edit-btn" data-id="${c.id}" data-name="${c.name}">编辑</button>
-            ${!c.is_default ? `<button class="btn btn-danger btn-sm cat-del-btn" data-id="${c.id}">删除</button>` : ''}
-          </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin:0 0 12px;font-size:15px;">云备份</h3>
+      <div style="margin-bottom:8px;">
+        <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;">GitHub Token</label>
+        <div class="inline-input-row">
+          <input type="password" id="gh-token-input" placeholder="ghp_xxxx" value="${maskedToken}" style="flex:1;">
+          <button class="btn btn-primary btn-sm" id="save-token-btn">保存</button>
+          ${savedToken ? `<button class="btn btn-outline btn-sm" id="clear-token-btn">清除</button>` : ''}
         </div>
-      `).join('')}
+      </div>
+      <div style="margin-bottom:12px;">
+        <button class="btn btn-primary" id="backup-now-btn" style="margin-right:8px;">备份到云端</button>
+        <button class="btn btn-outline" id="restore-now-btn">从云端恢复</button>
+      </div>
+      ${lastBackup ? `<div style="font-size:12px;color:var(--text-secondary);">上次备份: ${lastBackup}</div>` : ''}
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">说明: 图片不包含在云备份中，仅备份文字数据</div>
     </div>
-    ${categories.length === 0 ? '<div class="empty-state"><div class="empty-text">暂无分类</div></div>' : ''}
+
+    <div class="card">
+      <h3 style="margin:0 0 12px;font-size:15px;">分类管理</h3>
+      <div class="inline-input-row">
+        <input type="text" id="new-cat-input" placeholder="输入新分类名称">
+        <button class="btn btn-primary btn-sm" id="add-cat-btn">添加</button>
+      </div>
+      <div id="cat-list">
+        ${categories.map(c => `
+          <div class="category-item" data-id="${c.id}">
+            <span class="cat-name">${c.name}${c.is_default ? ' <span style="font-size:11px;color:var(--text-secondary)">内置</span>' : ''}</span>
+            <div class="cat-actions">
+              <button class="btn btn-outline btn-sm cat-edit-btn" data-id="${c.id}" data-name="${c.name}">编辑</button>
+              ${!c.is_default ? `<button class="btn btn-danger btn-sm cat-del-btn" data-id="${c.id}">删除</button>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      ${categories.length === 0 ? '<div class="empty-state"><div class="empty-text">暂无分类</div></div>' : ''}
+    </div>
   `;
+
+  // Save token
+  document.getElementById('save-token-btn').addEventListener('click', () => {
+    const input = document.getElementById('gh-token-input');
+    const val = input.value.trim();
+    if (!val) { showToast('请输入 Token'); return; }
+    // If user didn't edit the masked value, skip
+    if (val.includes('****')) { showToast('Token 未更改'); return; }
+    GistBackupService.setToken(val);
+    showToast('Token 已保存');
+    renderCategoryManagePage(container);
+  });
+
+  // Clear token
+  const clearBtn = document.getElementById('clear-token-btn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      GistBackupService.setToken(null);
+      showToast('Token 已清除');
+      renderCategoryManagePage(container);
+    });
+  }
+
+  // Backup now
+  document.getElementById('backup-now-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('backup-now-btn');
+    btn.disabled = true;
+    btn.textContent = '备份中...';
+    try {
+      await GistBackupService.backupToGist();
+      showToast('备份成功');
+      renderCategoryManagePage(container);
+    } catch (e) {
+      showToast(e.message || '备份失败');
+      btn.disabled = false;
+      btn.textContent = '备份到云端';
+    }
+  });
+
+  // Restore now
+  document.getElementById('restore-now-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('restore-now-btn');
+    btn.disabled = true;
+    btn.textContent = '恢复中...';
+    try {
+      await GistBackupService.restoreFromGist();
+      showToast('恢复成功');
+      renderCategoryManagePage(container);
+    } catch (e) {
+      showToast(e.message || '恢复失败');
+      btn.disabled = false;
+      btn.textContent = '从云端恢复';
+    }
+  });
 
   // Add category
   document.getElementById('add-cat-btn').addEventListener('click', async () => {
@@ -1286,6 +1373,7 @@ async function renderCategoryManagePage(container) {
     try {
       await CategoryService.add(name);
       showToast('添加成功');
+      GistBackupService.autoBackup();
       renderCategoryManagePage(container);
     } catch (e) {
       showToast('分类名称已存在');
@@ -1302,6 +1390,7 @@ async function renderCategoryManagePage(container) {
         try {
           await CategoryService.update(id, newName.trim());
           showToast('更新成功');
+          GistBackupService.autoBackup();
           renderCategoryManagePage(container);
         } catch (e) {
           showToast('更新失败');
@@ -1319,6 +1408,7 @@ async function renderCategoryManagePage(container) {
         try {
           await CategoryService.delete(id);
           showToast('已删除');
+          GistBackupService.autoBackup();
           renderCategoryManagePage(container);
         } catch (e) {
           showToast(e.message || '删除失败');

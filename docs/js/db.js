@@ -160,6 +160,17 @@ async function dbDelete(storeName, id) {
   });
 }
 
+async function dbClearStore(storeName) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const req = store.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
 async function dbGetByIndex(storeName, indexName, value) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
