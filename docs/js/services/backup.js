@@ -85,7 +85,13 @@ const GistBackupService = (() => {
 
     const data = await exportAllData();
     const content = JSON.stringify(data, null, 2);
-    const gistId = getGistId();
+    let gistId = getGistId();
+
+    // If no local gist_id, try to find existing one via API
+    if (!gistId) {
+      gistId = await findExistingGist(token);
+      if (gistId) setGistId(gistId);
+    }
 
     const filename = 'reimburseflow_backup.json';
     const body = {
@@ -134,11 +140,31 @@ const GistBackupService = (() => {
     return result;
   }
 
+  // Find existing ReimburseFlow backup gist via API
+  async function findExistingGist(token) {
+    const response = await fetch('https://api.github.com/gists?per_page=100', {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+    if (!response.ok) return null;
+    const gists = await response.json();
+    const found = gists.find(g => g.description === 'ReimburseFlow Backup');
+    return found ? found.id : null;
+  }
+
   async function restoreFromGist() {
     const token = getToken();
-    const gistId = getGistId();
     if (!token) throw new Error('请先设置 GitHub Token');
-    if (!gistId) throw new Error('尚未创建过备份');
+
+    let gistId = getGistId();
+    // If no local gist_id, search via API
+    if (!gistId) {
+      gistId = await findExistingGist(token);
+      if (!gistId) throw new Error('尚未创建过备份');
+      setGistId(gistId);
+    }
 
     const response = await fetch(`https://api.github.com/gists/${gistId}`, {
       headers: {
