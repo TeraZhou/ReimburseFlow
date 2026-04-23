@@ -265,20 +265,14 @@ async function renderHomePage(container) {
 // ===== TRANSACTION LIST PAGE =====
 async function renderTransactionListPage(container) {
   const categories = await CategoryService.getAll();
+  const companyTitles = await CompanyTitleService.getAll();
   const allTransactions = await TransactionService.getAll();
   const catMap = {};
   categories.forEach(c => catMap[c.id] = c.name);
 
-  // Multi-dimension filter state
-  let dim1 = 'category';
-  let dim2 = 'month';
-  const dimensions = [
-    { key: 'category', label: '费用类别' },
-    { key: 'month', label: '日期' },
-    { key: 'company', label: '公司抬头' }
-  ];
-
-  // Date filter state
+  // Filter state
+  let categoryFilter = 'all';
+  let companyFilter = 'all';
   let dateFrom = '';
   let dateTo = '';
 
@@ -286,15 +280,15 @@ async function renderTransactionListPage(container) {
   let batchMode = false;
   let selectedIds = new Set();
 
-  function getDimensionValue(t, dim) {
-    if (dim === 'category') return catMap[t.category_id] || '未知';
-    if (dim === 'month') return DateUtil.formatMonth(t.transaction_date);
-    if (dim === 'company') return t.company_title || '未填写';
-    return '未知';
-  }
-
   function getFilteredTransactions() {
     let filtered = allTransactions;
+    if (categoryFilter !== 'all') {
+      const catId = parseInt(categoryFilter);
+      filtered = filtered.filter(t => t.category_id === catId);
+    }
+    if (companyFilter !== 'all') {
+      filtered = filtered.filter(t => (t.company_title || '') === companyFilter);
+    }
     if (dateFrom) {
       const fromTs = DateUtil.parse(dateFrom);
       if (fromTs) filtered = filtered.filter(t => t.transaction_date >= fromTs);
@@ -303,57 +297,32 @@ async function renderTransactionListPage(container) {
       const toTs = new Date(new Date(dateTo).getTime() + 86400000 - 1).getTime();
       if (toTs) filtered = filtered.filter(t => t.transaction_date <= toTs);
     }
+    // Sort by date descending
+    filtered.sort((a, b) => b.transaction_date - a.transaction_date);
     return filtered;
   }
 
   function renderList() {
     const transactions = getFilteredTransactions();
 
-    // Group by dim1, then within each group group by dim2
-    const groups = {};
-    transactions.forEach(t => {
-      const key1 = getDimensionValue(t, dim1);
-      if (!groups[key1]) groups[key1] = {};
-      const key2 = getDimensionValue(t, dim2);
-      if (!groups[key1][key2]) groups[key1][key2] = [];
-      groups[key1][key2].push(t);
-    });
-
     const total = safeSum(transactions);
     const reimbursedTotal = safeSum(transactions.filter(t => t.is_reimbursed));
     const unreimbursedTotal = safeSum(transactions.filter(t => !t.is_reimbursed));
 
-    // Build grouped display
-    let groupedHtml = '';
+    // Build list display (flat, sorted by date desc)
+    let listHtml = '';
     if (transactions.length === 0) {
-      groupedHtml = `
+      listHtml = `
         <div class="empty-state">
           <div class="empty-icon">📋</div>
           <div class="empty-text">暂无交易记录</div>
           <button class="btn btn-primary" onclick="location.hash='#/transactions/add'">记一笔</button>
         </div>`;
     } else {
-      Object.entries(groups).forEach(([key1, subGroups]) => {
-        let groupTotal = 0;
-        Object.values(subGroups).forEach(items => {
-          groupTotal += safeSum(items);
-        });
-        groupedHtml += `<div class="group-header">${key1} <span style="float:right;font-size:13px;color:var(--text-secondary)">-${MoneyUtil.format(groupTotal)}</span></div>`;
-        Object.entries(subGroups).forEach(([key2, items]) => {
-          if (key1 !== key2) {
-            const subTotal = safeSum(items);
-            groupedHtml += `<div class="sub-group-header">${key2} <span style="float:right;font-size:12px;color:var(--text-secondary)">-${MoneyUtil.format(subTotal)}</span></div>`;
-          }
-          items.forEach(t => {
-            groupedHtml += renderTransactionItem(t, catMap, batchMode, selectedIds.has(t.id));
-          });
-        });
+      transactions.forEach(t => {
+        listHtml += renderTransactionItem(t, catMap, batchMode, selectedIds.has(t.id));
       });
     }
-
-    // Build dimension selector options (exclude the other dim's current value)
-    const dim1Options = dimensions.filter(d => d.key !== dim2);
-    const dim2Options = dimensions.filter(d => d.key !== dim1);
 
     container.innerHTML = `
       <div class="page-header">
@@ -365,16 +334,17 @@ async function renderTransactionListPage(container) {
       </div>
       <div class="filter-bar" style="flex-wrap:wrap;gap:8px 12px;">
         <div style="display:flex;align-items:center;gap:4px;">
-          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">按</span>
-          <select id="dim1-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
-            ${dim1Options.map(d => `<option value="${d.key}" ${d.key === dim1 ? 'selected' : ''}>${d.label}</option>`).join('')}
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">费用类别</span>
+          <select id="tx-cat-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            <option value="all" ${categoryFilter === 'all' ? 'selected' : ''}>全部</option>
+            ${categories.map(c => `<option value="${c.id}" ${categoryFilter == c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
           </select>
-          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">汇总</span>
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
-          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">子分组</span>
-          <select id="dim2-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
-            ${dim2Options.map(d => `<option value="${d.key}" ${d.key === dim2 ? 'selected' : ''}>${d.label}</option>`).join('')}
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">公司抬头</span>
+          <select id="tx-company-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            <option value="all" ${companyFilter === 'all' ? 'selected' : ''}>全部</option>
+            ${companyTitles.map(ct => `<option value="${ct.name}" ${companyFilter === ct.name ? 'selected' : ''}>${ct.name}</option>`).join('')}
           </select>
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
@@ -402,26 +372,21 @@ async function renderTransactionListPage(container) {
         <span style="font-size:12px;color:var(--text-secondary)">未报销: ${MoneyUtil.format(unreimbursedTotal)}</span>
       </div>
       <div id="tx-list-body">
-        ${groupedHtml}
+        ${listHtml}
       </div>
     `;
 
-    // Bind dimension selectors - fixed logic
-    document.getElementById('dim1-select').addEventListener('change', function() {
-      dim1 = this.value;
-      if (dim1 === dim2) {
-        const other = dimensions.find(d => d.key !== dim1);
-        dim2 = other.key;
-      }
+    // Bind category filter
+    document.getElementById('tx-cat-select').addEventListener('change', function() {
+      categoryFilter = this.value;
+      selectedIds.clear();
       renderList();
     });
 
-    document.getElementById('dim2-select').addEventListener('change', function() {
-      dim2 = this.value;
-      if (dim1 === dim2) {
-        const other = dimensions.find(d => d.key !== dim2);
-        dim1 = other.key;
-      }
+    // Bind company filter
+    document.getElementById('tx-company-select').addEventListener('change', function() {
+      companyFilter = this.value;
+      selectedIds.clear();
       renderList();
     });
 
@@ -583,6 +548,7 @@ function renderTransactionItem(t, catMap, batchMode = false, checked = false) {
 // ===== TRANSACTION ADD/EDIT PAGE =====
 async function renderTransactionAddPage(container, editId = null) {
   const categories = await CategoryService.getAll();
+  const companyTitles = await CompanyTitleService.getAll();
   let transaction = editId ? await TransactionService.getById(editId) : null;
   const isEdit = !!transaction;
 
@@ -637,8 +603,10 @@ async function renderTransactionAddPage(container, editId = null) {
 
         <div class="form-group">
           <label>公司抬头</label>
-          <input type="text" id="tx-company" placeholder="购买方名称（选填）"
-            value="${ocrResult && ocrResult.company_title ? ocrResult.company_title : defaultCompany}">
+          <select id="tx-company">
+            <option value="">请选择（选填）</option>
+            ${companyTitles.map(ct => `<option value="${ct.name}" ${defaultCompany === ct.name ? 'selected' : ''}>${ct.name}</option>`).join('')}
+          </select>
         </div>
 
         <div class="form-group">
@@ -899,17 +867,34 @@ async function renderTransactionDetailPage(container, id) {
 // ===== INVOICE LIST PAGE =====
 async function renderInvoiceListPage(container) {
   let statusFilter = 'all';
+  let categoryFilter = 'all';
+  let companyFilter = 'all';
   let dateFrom = '';
   let dateTo = '';
 
+  // Batch mode state
+  let batchMode = false;
+  let selectedIds = new Set();
+
   async function renderList() {
     const allInvoices = await InvoiceService.getAll();
+    const categories = await CategoryService.getAll();
+    const companyTitles = await CompanyTitleService.getAll();
+    const catMap = {};
+    categories.forEach(c => catMap[c.id] = c.name);
 
     // Apply filters
     let filtered = allInvoices;
     if (statusFilter !== 'all') {
       const val = statusFilter === 'reimbursed' ? 1 : 0;
       filtered = filtered.filter(i => i.is_reimbursed === val);
+    }
+    if (categoryFilter !== 'all') {
+      const catId = parseInt(categoryFilter);
+      filtered = filtered.filter(i => i.category_id === catId);
+    }
+    if (companyFilter !== 'all') {
+      filtered = filtered.filter(i => (i.company_title || '') === companyFilter);
     }
     if (dateFrom) {
       const fromTs = DateUtil.parse(dateFrom);
@@ -928,6 +913,7 @@ async function renderInvoiceListPage(container) {
       <div class="page-header">
         <h1>发票管理</h1>
         <div style="display:flex;gap:6px;">
+          <button class="btn ${batchMode ? 'btn-primary' : 'btn-outline'} btn-sm" id="inv-batch-toggle">${batchMode ? '退出管理' : '管理'}</button>
           <button class="btn btn-outline btn-sm" id="inv-batch-download-btn">下载附件</button>
           <button class="btn btn-outline btn-sm" id="inv-export-btn">导出</button>
           <button class="btn btn-primary btn-sm" onclick="location.hash='#/invoices/add'">+ 新增</button>
@@ -943,6 +929,20 @@ async function renderInvoiceListPage(container) {
           </select>
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">费用类别</span>
+          <select id="inv-cat-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            <option value="all" ${categoryFilter === 'all' ? 'selected' : ''}>全部</option>
+            ${categories.map(c => `<option value="${c.id}" ${categoryFilter == c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">公司抬头</span>
+          <select id="inv-company-select" class="dim-select" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+            <option value="all" ${companyFilter === 'all' ? 'selected' : ''}>全部</option>
+            ${companyTitles.map(ct => `<option value="${ct.name}" ${companyFilter === ct.name ? 'selected' : ''}>${ct.name}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
           <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">起始</span>
           <input type="date" id="inv-date-from" value="${dateFrom}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
         </div>
@@ -951,6 +951,14 @@ async function renderInvoiceListPage(container) {
           <input type="date" id="inv-date-to" value="${dateTo}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
         </div>
       </div>
+      ${batchMode ? `
+        <div class="batch-toolbar">
+          <span class="batch-info">已选 ${selectedIds.size} 项</span>
+          <button class="btn btn-outline btn-sm" id="inv-select-all">${selectedIds.size === filtered.length && filtered.length > 0 ? '取消全选' : '全选'}</button>
+          <button class="btn btn-outline btn-sm" id="inv-batch-reimbursed">标记已报销</button>
+          <button class="btn btn-outline btn-sm" id="inv-batch-unreimbursed">标记未报销</button>
+        </div>
+      ` : ''}
       <div class="summary-bar" style="flex-wrap:wrap;gap:4px 12px;">
         <span>合计: <span class="total-amount">${MoneyUtil.format(filteredTotal)}</span> (${filtered.length}张)</span>
         <span style="font-size:12px;color:var(--text-secondary)">已报销: ${MoneyUtil.format(filteredReimbursed)}</span>
@@ -965,8 +973,12 @@ async function renderInvoiceListPage(container) {
           </div>
         ` : filtered.map(inv => {
           const isPdf = inv.image_uri && inv.image_uri.startsWith('data:application/pdf');
+          const checkboxHtml = batchMode
+            ? `<input type="checkbox" class="tx-checkbox" data-inv-check="${inv.id}" ${selectedIds.has(inv.id) ? 'checked' : ''} onclick="event.stopPropagation()">`
+            : '';
           return `
-          <div class="invoice-card" onclick="location.hash='#/invoices/detail/${inv.id}'">
+          <div class="invoice-card" ${batchMode ? '' : `onclick="location.hash='#/invoices/detail/${inv.id}'"`}>
+            ${checkboxHtml}
             <div class="invoice-top">
               ${inv.image_uri ? (isPdf
                 ? `<div class="invoice-thumb" style="display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--danger);font-weight:700;background:#FFF5F5;">PDF</div>`
@@ -993,6 +1005,21 @@ async function renderInvoiceListPage(container) {
     // Bind status filter
     document.getElementById('inv-status-select').addEventListener('change', function() {
       statusFilter = this.value;
+      selectedIds.clear();
+      renderList();
+    });
+
+    // Bind category filter
+    document.getElementById('inv-cat-select').addEventListener('change', function() {
+      categoryFilter = this.value;
+      selectedIds.clear();
+      renderList();
+    });
+
+    // Bind company filter
+    document.getElementById('inv-company-select').addEventListener('change', function() {
+      companyFilter = this.value;
+      selectedIds.clear();
       renderList();
     });
 
@@ -1006,16 +1033,85 @@ async function renderInvoiceListPage(container) {
       renderList();
     });
 
-    // Bind toggle reimbursed
-    container.querySelectorAll('[data-action="toggle"]').forEach(badge => {
-      badge.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const invId = parseInt(badge.dataset.id);
-        await InvoiceService.toggleReimbursed(invId);
-        GistBackupService.autoBackup();
+    // Bind batch mode toggle
+    document.getElementById('inv-batch-toggle').addEventListener('click', () => {
+      batchMode = !batchMode;
+      if (!batchMode) selectedIds.clear();
+      renderList();
+    });
+
+    // Bind batch operations
+    if (batchMode) {
+      // Select all
+      document.getElementById('inv-select-all').addEventListener('click', () => {
+        if (selectedIds.size === filtered.length) {
+          selectedIds.clear();
+        } else {
+          filtered.forEach(i => selectedIds.add(i.id));
+        }
         renderList();
       });
-    });
+
+      // Batch mark reimbursed
+      document.getElementById('inv-batch-reimbursed').addEventListener('click', async () => {
+        if (selectedIds.size === 0) { showToast('请先选择发票'); return; }
+        for (const id of selectedIds) {
+          const inv = await InvoiceService.getById(id);
+          if (inv && !inv.is_reimbursed) {
+            await InvoiceService.toggleReimbursed(id);
+          }
+        }
+        GistBackupService.autoBackup();
+        selectedIds.clear();
+        batchMode = false;
+        showToast('已标记为已报销');
+        renderList();
+      });
+
+      // Batch mark unreimbursed
+      document.getElementById('inv-batch-unreimbursed').addEventListener('click', async () => {
+        if (selectedIds.size === 0) { showToast('请先选择发票'); return; }
+        for (const id of selectedIds) {
+          const inv = await InvoiceService.getById(id);
+          if (inv && inv.is_reimbursed) {
+            await InvoiceService.toggleReimbursed(id);
+          }
+        }
+        GistBackupService.autoBackup();
+        selectedIds.clear();
+        batchMode = false;
+        showToast('已标记为未报销');
+        renderList();
+      });
+
+      // Bind checkboxes
+      container.querySelectorAll('[data-inv-check]').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const invId = parseInt(cb.dataset.invCheck);
+          if (cb.checked) {
+            selectedIds.add(invId);
+          } else {
+            selectedIds.delete(invId);
+          }
+          const info = container.querySelector('.batch-info');
+          if (info) info.textContent = `已选 ${selectedIds.size} 项`;
+        });
+      });
+    }
+
+    // Bind toggle reimbursed (non-batch mode)
+    if (!batchMode) {
+      container.querySelectorAll('[data-action="toggle"]').forEach(badge => {
+        badge.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const invId = parseInt(badge.dataset.id);
+          await InvoiceService.toggleReimbursed(invId);
+          GistBackupService.autoBackup();
+          renderList();
+        });
+      });
+    }
 
     // Batch download attachments
     document.getElementById('inv-batch-download-btn').addEventListener('click', () => {
@@ -1058,6 +1154,8 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
   let imageUri = invoice ? invoice.image_uri : null;
   let ocrResult = null;
   let isPdfAttachment = imageUri ? imageUri.startsWith('data:application/pdf') : false;
+  const companyTitles = await CompanyTitleService.getAll();
+  let categories = await CategoryService.getAll();
 
   function render() {
     const defaultDate = invoice ? DateUtil.format(invoice.invoice_date) : DateUtil.format(Date.now());
@@ -1111,8 +1209,23 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
 
         <div class="form-group">
           <label>公司抬头</label>
-          <input type="text" id="inv-company" placeholder="购买方名称"
-            value="${ocrResult && ocrResult.company_title ? ocrResult.company_title : defaultCompany}">
+          <select id="inv-company">
+            <option value="">请选择公司抬头</option>
+            ${companyTitles.map(ct => `<option value="${ct.name}" ${defaultCompany === ct.name ? 'selected' : ''}>${ct.name}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>费用类别</label>
+          <select id="inv-category" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:15px;background:var(--bg);color:var(--text);">
+            <option value="">不选择</option>
+            ${categories.map(c => {
+              let selected = false;
+              if (ocrResult && ocrResult.category && ocrResult.category.id === c.id) selected = true;
+              else if (isEdit && invoice.category_id === c.id) selected = true;
+              return `<option value="${c.id}" ${selected ? 'selected' : ''}>${c.name}</option>`;
+            }).join('')}
+          </select>
         </div>
 
         <div class="form-group">
@@ -1185,6 +1298,7 @@ async function renderInvoiceAddPage(container, ocrMode = false, editId = null) {
         amount,
         invoice_date: dateTimestamp,
         company_title: company,
+        category_id: parseInt(document.getElementById('inv-category').value) || null,
         invoice_number: number,
         seller_name: seller,
         remarks,
@@ -1413,6 +1527,7 @@ async function renderInvoiceDetailPage(container, id) {
 // ===== CATEGORY MANAGE PAGE =====
 async function renderCategoryManagePage(container) {
   const categories = await CategoryService.getAll();
+  const companyTitles = await CompanyTitleService.getAll();
   const savedToken = GistBackupService.getToken();
   const maskedToken = savedToken ? savedToken.slice(0, 4) + '****' : '';
   const lastBackup = GistBackupService.getLastBackup();
@@ -1440,6 +1555,26 @@ async function renderCategoryManagePage(container) {
       </div>
       ${lastBackup ? `<div style="font-size:12px;color:var(--text-secondary);">上次备份: ${lastBackup}</div>` : ''}
       <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">说明: 图片不包含在云备份中，仅备份文字数据</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin:0 0 12px;font-size:15px;">公司抬头管理</h3>
+      <div class="inline-input-row">
+        <input type="text" id="new-ct-input" placeholder="输入公司抬头名称">
+        <button class="btn btn-primary btn-sm" id="add-ct-btn">添加</button>
+      </div>
+      <div id="ct-list">
+        ${companyTitles.map(ct => `
+          <div class="category-item" data-ct-id="${ct.id}">
+            <span class="cat-name">${ct.name}</span>
+            <div class="cat-actions">
+              <button class="btn btn-outline btn-sm ct-edit-btn" data-id="${ct.id}" data-name="${ct.name}">编辑</button>
+              <button class="btn btn-danger btn-sm ct-del-btn" data-id="${ct.id}">删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      ${companyTitles.length === 0 ? '<div class="empty-state"><div class="empty-text">暂无公司抬头</div></div>' : ''}
     </div>
 
     <div class="card">
@@ -1515,6 +1650,58 @@ async function renderCategoryManagePage(container) {
       btn.disabled = false;
       btn.textContent = '从云端恢复';
     }
+  });
+
+  // Add company title
+  document.getElementById('add-ct-btn').addEventListener('click', async () => {
+    const input = document.getElementById('new-ct-input');
+    const name = input.value.trim();
+    if (!name) { showToast('请输入公司抬头名称'); return; }
+    try {
+      await CompanyTitleService.add(name);
+      showToast('添加成功');
+      GistBackupService.autoBackup();
+      renderCategoryManagePage(container);
+    } catch (e) {
+      showToast(e.message || '添加失败');
+    }
+  });
+
+  // Edit company title
+  container.querySelectorAll('.ct-edit-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id);
+      const oldName = btn.dataset.name;
+      const newName = prompt('修改公司抬头名称:', oldName);
+      if (newName && newName.trim() && newName.trim() !== oldName) {
+        try {
+          await CompanyTitleService.update(id, newName.trim());
+          showToast('更新成功');
+          GistBackupService.autoBackup();
+          renderCategoryManagePage(container);
+        } catch (e) {
+          showToast(e.message || '更新失败');
+        }
+      }
+    });
+  });
+
+  // Delete company title
+  container.querySelectorAll('.ct-del-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id);
+      const ok = await showConfirm('确定删除这个公司抬头吗？');
+      if (ok) {
+        try {
+          await CompanyTitleService.delete(id);
+          showToast('已删除');
+          GistBackupService.autoBackup();
+          renderCategoryManagePage(container);
+        } catch (e) {
+          showToast(e.message || '删除失败');
+        }
+      }
+    });
   });
 
   // Add category

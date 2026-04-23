@@ -46,12 +46,14 @@ const GistBackupService = (() => {
     const categories = (await dbGetAll('category')).map(stripImages);
     const transactions = (await dbGetAll('transaction')).map(stripImages);
     const invoices = (await dbGetAll('invoice')).map(stripImages);
+    const company_titles = (await dbGetAll('company_title')).map(stripImages);
     return {
-      version: 2,
+      version: 3,
       exported_at: Date.now(),
       categories,
       transactions,
       invoices,
+      company_titles,
     };
   }
 
@@ -67,6 +69,7 @@ const GistBackupService = (() => {
     await dbClearStore('category');
     await dbClearStore('transaction');
     await dbClearStore('invoice');
+    await dbClearStore('company_title');
 
     for (const cat of json.categories) {
       await dbPut('category', cat);
@@ -76,6 +79,11 @@ const GistBackupService = (() => {
     }
     for (const inv of json.invoices) {
       await dbPut('invoice', inv);
+    }
+    if (json.company_titles) {
+      for (const ct of json.company_titles) {
+        await dbPut('company_title', ct);
+      }
     }
   }
 

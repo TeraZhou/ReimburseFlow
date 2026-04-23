@@ -283,7 +283,7 @@ const OcrService = {
       amount: this.extractAmount(text),
       date: this.extractDate(text),
       category: this.guessCategory(text, categories),
-      company_title: this.extractCompanyTitle(text),
+      company_title: null,
       invoice_number: this.extractInvoiceNumber(text),
       seller_name: this.extractSellerName(text),
     };

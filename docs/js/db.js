@@ -1,6 +1,6 @@
 // ===== IndexedDB Database Layer =====
 const DB_NAME = 'ReimburseFlowDB';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 let dbInstance = null;
 
@@ -56,6 +56,32 @@ function openDB() {
         invStore.createIndex('invoice_number', 'invoice_number');
         invStore.createIndex('is_reimbursed', 'is_reimbursed');
         invStore.createIndex('invoice_date', 'invoice_date');
+      }
+
+      // Invoice table: v2 -> v3, add category_id index and migrate existing records
+      if (oldVersion < 3 && db.objectStoreNames.contains('invoice')) {
+        const invStore = event.target.transaction.objectStore('invoice');
+        if (!invStore.indexNames.contains('category_id')) {
+          invStore.createIndex('category_id', 'category_id');
+        }
+        const cursorReq = invStore.openCursor();
+        cursorReq.onsuccess = (e) => {
+          const cursor = e.target.result;
+          if (cursor) {
+            const record = cursor.value;
+            if (record.category_id === undefined) {
+              record.category_id = null;
+              cursor.update(record);
+            }
+            cursor.continue();
+          }
+        };
+      }
+
+      // Company Title table (v3 -> v4)
+      if (!db.objectStoreNames.contains('company_title')) {
+        const ctStore = db.createObjectStore('company_title', { keyPath: 'id', autoIncrement: true });
+        ctStore.createIndex('name', 'name', { unique: true });
       }
     };
 
