@@ -328,6 +328,7 @@ async function renderTransactionListPage(container) {
       <div class="page-header">
         <h1>交易记录</h1>
         <div style="display:flex;gap:6px;">
+          <button class="btn ${batchMode ? 'btn-primary' : 'btn-outline'} btn-sm" id="tx-batch-toggle">${batchMode ? '退出管理' : '管理'}</button>
           <button class="btn btn-outline btn-sm" id="tx-export-btn">导出</button>
           <button class="btn btn-primary btn-sm" onclick="location.hash='#/transactions/add'">+ 新增</button>
         </div>
@@ -355,7 +356,6 @@ async function renderTransactionListPage(container) {
           <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">截止</span>
           <input type="date" id="tx-date-to" value="${dateTo}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
         </div>
-        <button class="btn ${batchMode ? 'btn-primary' : 'btn-outline'} btn-sm" id="tx-batch-toggle">${batchMode ? '退出管理' : '管理'}</button>
       </div>
       ${batchMode ? `
         <div class="batch-toolbar">
